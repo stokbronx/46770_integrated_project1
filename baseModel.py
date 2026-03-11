@@ -1,10 +1,14 @@
 #%% IMPORT
+import pandas as pd
+pd.options.mode.string_storage = "python"
 import pypsa
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
     wind_cf_hourly, solar_cf_hourly,
 )
 
+# Creation of the total demand for brazil
+total_demand=demand_north+demand_south+demand_north_east+demand_south_east
 
 #%% MODEL PARAMETERS
 
@@ -20,9 +24,12 @@ from datapreparation import (
 marginal_cost = dict(
     hydro=0,
     thermal=100,
+    gas = 50,
+    coal= 70,
     nuclear=20,
     wind=0,
     solar=0,
+    oil=80,
 )
 
 power_plants = {
@@ -47,3 +54,57 @@ loads = {
 n = pypsa.Network()
 
 n.add("Bus", "BRA", y=-22.9, x=-43.17, v_nom=400, carrier="AC")
+
+# addition of carriers for the fuels with information on specific carbon dioxide emissions, a nice name, and colors for plotting.
+n.add(
+    "Carrier",
+    ["coal", "gas", "oil", "hydro", "wind", "thermal", "nuclear", "solar"],
+    nice_name=["Coal","Gas","Oil","Hydro","Onshore Wind","Thermal","Nuclear","Solar"
+    ],
+    color=["grey","indianred","black","aquamarine","dodgerblue","darkorange","purple","gold"
+    ],
+)
+n.add("Carrier", ["electricity", "AC"])
+
+# Addition of generators
+for tech, p_nom in power_plants["BRA"].items():
+    n.add(
+        "Generator",
+        f"BRA {tech}",
+        bus="BRA",
+        carrier=tech,
+        p_nom=p_nom,
+        marginal_cost=marginal_cost.get(tech, 0),
+    )
+
+n.generators
+
+# Addition of loads
+n.add(
+    "Load",
+    "BRA electricity demand",
+    bus="BRA",
+    p_set=loads["BRA"],
+    carrier="electricity",
+)
+
+
+# Convert any pandas StringDtype (pyarrow) columns to plain Python objects.
+# Some pandas versions use ArrowStringArray for string columns, which can cause
+# issues inside PyPSA's optimization routines.
+for comp in n.components:
+    df = getattr(n, comp.list_name, None)
+    if isinstance(df, pd.DataFrame):
+        # cast any string-backed columns/index to object dtype
+        for col in df.columns:
+            if pd.api.types.is_string_dtype(df[col].dtype):
+                df[col] = df[col].astype(object)
+        if pd.api.types.is_string_dtype(df.index.dtype):
+            df.index = df.index.astype(object)
+
+
+# %% Optimization of the simple network
+n.optimize(solver_name="highs")
+
+
+# %%
