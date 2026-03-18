@@ -4,84 +4,52 @@ pd.options.mode.string_storage = "python"
 import pypsa
 import matplotlib.pyplot as plt
 from datapreparation import (
-    demand_north, demand_south, demand_north_east, demand_south_east,
-    wind_cf_hourly, solar_cf_hourly,
+    wind_cf_hourly, solar_cf_hourly, demand_south_east,
 )
 
-wind_cf_hourly.index = wind_cf_hourly.index.map(lambda t: t.replace(year=2024))
+region = 'SE'
+
 full_2024_index = pd.date_range('2024-01-01', '2024-12-31 23:00', freq='h', tz='UTC')
+
+wind_cf_hourly = wind_cf_hourly.copy()
+if wind_cf_hourly.index.tz is None:
+    wind_cf_hourly.index = wind_cf_hourly.index.tz_localize('UTC')
 wind_cf_hourly = wind_cf_hourly.reindex(full_2024_index).interpolate()
 
-solar_cf_hourly.index = solar_cf_hourly.index.map(lambda t: t.replace(year=2024))
+solar_cf_hourly = solar_cf_hourly.copy()
 if solar_cf_hourly.index.tz is None:
     solar_cf_hourly.index = solar_cf_hourly.index.tz_localize('UTC')
 solar_cf_hourly = solar_cf_hourly.reindex(full_2024_index).interpolate()
 
-# Creation of the total demand for brazil
-total_demand=demand_north+demand_south+demand_north_east+demand_south_east
+demand_SE = demand_south_east.values
 
 #%% MODEL PARAMETERS
 
 capital_cost = dict(
-    hydro=3750000, # $/MW
-    #gas=1000,
-    #coal=1000,
-    biomass=3750000, # $/MW
-    nuclear=7500000, # $/MW
-    wind=2100000, # $/MW
-    solar=1250000, # $/MW
+    hydro=3750000,
+    biomass=3750000,
+    nuclear=7500000,
+    wind=2100000,
+    solar=1250000,
 )
 
-#JOINT CAPACITY AND DISPATCH OPTIMIZATION (NOMINAL CAPACITY IS A DECISION VARIABLE, NOT FIXED)
-
-#MARGINAL COSTS (Needs to be updated with data from litterature)
 marginal_cost = dict(
-    hydro=5, # $/MWh
-    #gas=1000,
-    #coal=100,
-    biomass=75, # $/MWh
-    nuclear=12, # $/MWh 
-    wind=0, # $/MWh
-    solar=0, # $/MWh
+    hydro=5,
+    biomass=75,
+    nuclear=12,
+    wind=0,
+    solar=0,
 )
 
-lifetime =  dict(
-    hydro = 65,
-    biomass = 25,
-    nuclear = 50,
-    wind = 25,
-    solar = 25
+lifetime = dict(
+    hydro=65,
+    biomass=25,
+    nuclear=50,
+    wind=25,
+    solar=25,
 )
 
-
-
-# # Regional shares estimated from the power plant map (each tech sums to 1.0 across regions)
-# share = {
-#     "North":      {"hydro": 0.30, "thermal": 0.10, "nuclear": 0.00, "wind": 0.02, "solar": 0.05},
-#     "South":      {"hydro": 0.20, "thermal": 0.15, "nuclear": 0.00, "wind": 0.08, "solar": 0.05},
-#     "North-East": {"hydro": 0.10, "thermal": 0.30, "nuclear": 0.00, "wind": 0.85, "solar": 0.60},
-#     "South-East": {"hydro": 0.40, "thermal": 0.45, "nuclear": 1.00, "wind": 0.05, "solar": 0.30},
-# }
-
-# bra_capacity = {"hydro": 110000, "thermal": 46500, "nuclear": 2000, "wind": 29500, "solar": 48500}
-
-# power_plants = {"BRA": bra_capacity}
-# for region in share:
-#     power_plants[region] = {tech: bra_capacity[tech] * share[region][tech] for tech in bra_capacity}
-
-#Use demand from datapreparation.py
-# load electricity demand data
-df_elec = pd.read_csv('data/demand_processed.csv', sep=',', index_col="din_instante") # in MWh
-df_elec.index = pd.to_datetime(df_elec.index) #change index to datatime
-region='SE'
-df_elec_SE = df_elec.loc[df_elec["region"]==region]
-df_elec_SE.drop(columns=["region"], inplace=True)
-print(df_elec_SE.head())
-
-
-#%% Max capacities for hydro
-
-max_capacity_hydro = 40000 #GW
+max_capacity_hydro = 40000
 
 
 
@@ -102,13 +70,10 @@ n.add("Bus",
 n.snapshots
 
 
-# add load to the bus
 n.add("Load",
     "load",
     bus="electricity bus",
-    p_set=df_elec_SE["demand [MW]"].values)
-
-n.loads_t.p_set
+    p_set=demand_SE)
 
 
 # %% Annuity function
