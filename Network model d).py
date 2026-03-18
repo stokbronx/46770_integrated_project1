@@ -15,21 +15,22 @@ network.add(
     nice_name=["Hydro", "Biomass", "Nuclear", "Wind", "Solar"],
     color=["aquamarine", "sienna", "purple", "dodgerblue", "gold"]
 )
-network.add("Carrier", ["electricity", "AC"])
+network.add("Carrier", "AC")
 
-network.add("Bus", "bus BRA-N", v_nom=400000.0, carrier="electricity") # V
-network.add("Bus", "bus BRA-NE", v_nom=400000.0, carrier="electricity") # V
-network.add("Bus", "bus BRA-S", v_nom=400000.0, carrier="electricity") # V
-network.add("Bus", "bus BRA-SE", v_nom=400000.0, carrier="electricity") # V
+
+network.add("Bus", "bus BRA-N", v_nom=400.0, carrier="AC") # V
+network.add("Bus", "bus BRA-NE", v_nom=400.0, carrier="AC") # V
+network.add("Bus", "bus BRA-S", v_nom=400.0, carrier="AC") # V
+network.add("Bus", "bus BRA-SE", v_nom=400.0, carrier="AC") # V
 network.buses
 
 # Adding the network lines between the buses
-network.add("Line"," line N-NE", bus0 = "bus BRA-N", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC")
-network.add("Line"," line NE-SE", bus0 = "bus BRA-NE", bus1= "bus BRA-SE", x=0.1, r=0.01, carrier="AC")
-network.add("Line"," line SE-S", bus0 = "bus BRA-SE", bus1= "bus BRA-S", x=0.1, r=0.01, carrier="AC")
-network.add("Line"," line SE-N", bus0 = "bus BRA-SE", bus1= "bus BRA-N", x=0.1, r=0.01, carrier="AC")
-network.add("Line"," line S-NE", bus0 = "bus BRA-S", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC")
-
+network.add("Line"," line N-NE", bus0 = "bus BRA-N", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC",s_nom=1100) 
+network.add("Line"," line NE-SE", bus0 = "bus BRA-NE", bus1= "bus BRA-SE", x=0.1, r=0.01, carrier="AC",s_nom=1100)
+network.add("Line"," line SE-S", bus0 = "bus BRA-SE", bus1= "bus BRA-S", x=0.1, r=0.01, carrier="AC",s_nom=1100)
+network.add("Line"," line SE-N", bus0 = "bus BRA-SE", bus1= "bus BRA-N", x=0.1, r=0.01, carrier="AC",s_nom=1100)
+network.add("Line"," line S-NE", bus0 = "bus BRA-S", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC",s_nom=1100)
+# x is the reactance, r is the resistance, s_nom is the nominal apparent power in VA
 
 # %% Adding the generators to the network
 power_plants = { 
@@ -56,10 +57,10 @@ for region, tech_shares in share.items():
         regional_power_plants[region][tech] = total_cap[tech] * share_fraction
 # lifetime of the technologies
 tech_lifetime = {
-    "hydro": 60,
+    "hydro": 65,
     "biomass": 25,
-    "nuclear": 60,
-    "wind": 30,
+    "nuclear": 50,
+    "wind": 25,
     "solar": 25,
 }
 # Add costs
@@ -71,7 +72,7 @@ capital_cost = dict(
     #coal=1000,
     biomass=3750000, # $/MW
     nuclear=7500000, # $/MW
-    wind=2100000, # $/MW
+    wind=2100000, # $/MW This value needs to be changed. Is currently offshore but should be changed to onshore
     solar=1250000, # $/MW
 )
 
@@ -79,7 +80,7 @@ capital_cost = dict(
 
 #MARGINAL COSTS (Needs to be updated with data from litterature)
 marginal_cost = dict(
-    hydro=5, # $/MWh
+    hydro=3, # $/MWh
     #gas=1000,
     #coal=100,
     biomass=75, # $/MWh
@@ -139,7 +140,7 @@ for region, tech_caps in regional_power_plants.items():
             f"{region} {tech}",
             bus=f"bus {region}",
             carrier=tech,
-            p_nom=p_nom,
+            p_nom=0,  # Start with zero capacity for optimization
             p_nom_extendable=True,
             capital_cost=cap_cost,
             marginal_cost=marg_cost,
@@ -213,4 +214,12 @@ print("Total system cost:", network.statistics.system_cost())
 print("Total capex:", network.statistics.capex())
 print("Total opex:", network.statistics.opex())
 # %%
-network.generators.p_nom_opt
+network.generators.p_nom_opt # Optimal capacities of the generators
+# %%
+network.generators_t.p # Optimal dispatch of the generators over time
+# %%
+network.lpf()
+#%% 
+network.lines_t.p0 # The active power flow on the lines can now be seen
+
+# %%
