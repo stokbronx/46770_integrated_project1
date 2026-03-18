@@ -2,6 +2,7 @@
 import pandas as pd
 pd.options.mode.string_storage = "python"
 import pypsa
+from pathlib import Path
 import matplotlib.pyplot as plt
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
@@ -62,8 +63,9 @@ marginal_cost = dict(
 #     power_plants[region] = {tech: bra_capacity[tech] * share[region][tech] for tech in bra_capacity}
 
 #Use demand from datapreparation.py
-# load electricity demand data
-df_elec = pd.read_csv('data/demand_processed.csv', sep=',', index_col="din_instante") # in MWh
+# load electricity demand data (path relative to this script)
+_DATA_DIR = Path(__file__).resolve().parent / "Data"
+df_elec = pd.read_csv(_DATA_DIR / "demand_processed.csv", sep=',', index_col="din_instante") # in MWh
 df_elec.index = pd.to_datetime(df_elec.index) #change index to datatime
 region='SE'
 df_elec_SE = df_elec.loc[df_elec["region"]==region]
