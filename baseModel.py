@@ -143,6 +143,7 @@ n.add("Generator",
 # add solar PV generator
 CF_solar = solar_cf_hourly[region][[hour.strftime("%Y-%m-%dT%H:%M:%SZ") for hour in n.snapshots]]
 
+capital_cost_solar = annuity(lifetime["solar"],0.07)*capital_cost["solar"]*(1+0.033) # in $/MW
 n.add("Generator",
     "solar",
     bus="electricity bus",
