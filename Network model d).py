@@ -1,6 +1,5 @@
 #%% # loading of data and libraries
 import pandas as pd
-pd.options.mode.string_storage = "python"
 import pypsa
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
@@ -18,10 +17,25 @@ network.add(
 network.add("Carrier", "AC")
 
 
-network.add("Bus", "bus BRA-N", v_nom=400.0, carrier="AC") # V
-network.add("Bus", "bus BRA-NE", v_nom=400.0, carrier="AC") # V
-network.add("Bus", "bus BRA-S", v_nom=400.0, carrier="AC") # V
-network.add("Bus", "bus BRA-SE", v_nom=400.0, carrier="AC") # V
+network.add("Bus", "bus BRA-N",
+            v_nom=400.0,
+            carrier="AC",
+            x=-60.0, y=-3.0)
+
+network.add("Bus", "bus BRA-NE",
+            v_nom=400.0,
+            carrier="AC",
+            x=-38.5, y=-12.9)
+
+network.add("Bus", "bus BRA-SE",
+            v_nom=400.0,
+            carrier="AC",
+            x=-46.6, y=-23.5)
+
+network.add("Bus", "bus BRA-S",
+            v_nom=400.0,
+            carrier="AC",
+            x=-51.2, y=-30.0)
 network.buses
 
 # Adding the network lines between the buses
@@ -217,9 +231,11 @@ print("Total opex:", network.statistics.opex())
 network.generators.p_nom_opt # Optimal capacities of the generators
 # %%
 network.generators_t.p # Optimal dispatch of the generators over time
-# %%
-network.lpf()
 #%% 
 network.lines_t.p0 # The active power flow on the lines can now be seen
 
 # %%
+network.plot(
+    bus_sizes=2,
+    line_widths=3
+)
