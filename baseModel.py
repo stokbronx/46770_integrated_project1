@@ -45,6 +45,14 @@ marginal_cost = dict(
     solar=0, # $/MWh
 )
 
+lifetime =  dict(
+    hydro = 65,
+    biomass = 25,
+    nuclear = 50,
+    wind = 25,
+    solar = 25
+)
+
 
 
 # # Regional shares estimated from the power plant map (each tech sums to 1.0 across regions)
@@ -122,7 +130,7 @@ n.add("Carrier", "solar")
 
 # add off shore wind generator
 CF_wind = wind_cf_hourly[region][[hour.strftime("%Y-%m-%dT%H:%M:%SZ") for hour in n.snapshots]]
-capital_cost_offshorewind = annuity(30,0.07)*capital_cost["wind"]*(1+0.033) # in $/MW
+capital_cost_offshorewind = annuity(lifetime["wind"],0.07)*capital_cost["wind"]*(1+0.033) # in $/MW
 n.add("Generator",
     "offshorewind",
     bus="electricity bus",
@@ -134,7 +142,8 @@ n.add("Generator",
 
 # add solar PV generator
 CF_solar = solar_cf_hourly[region][[hour.strftime("%Y-%m-%dT%H:%M:%SZ") for hour in n.snapshots]]
-capital_cost_solar = annuity(25,0.07)*capital_cost["solar"]*(1+0.033) # in $/MW
+
+capital_cost_solar = annuity(lifetime["solar"],0.07)*capital_cost["solar"]*(1+0.033) # in $/MW
 n.add("Generator",
     "solar",
     bus="electricity bus",
@@ -145,7 +154,7 @@ n.add("Generator",
     p_max_pu = CF_solar.values)
 
 # add Biomass generator
-capital_cost_biomass = annuity(25,0.07)*capital_cost["biomass"]*(1+0.033) # in $/MW
+capital_cost_biomass = annuity(lifetime["biomass"],0.07)*capital_cost["biomass"]*(1+0.033) # in $/MW
 marginal_cost_biomass = marginal_cost["biomass"] # in $/MWh_el
 n.add("Generator",
     "biomass",
@@ -156,7 +165,7 @@ n.add("Generator",
     marginal_cost = marginal_cost_biomass)
 
 # add Nuclear generator
-capital_cost_nuclear = annuity(60,0.07)*capital_cost["nuclear"]*(1+0.033) # in $/MW
+capital_cost_nuclear = annuity(lifetime["nuclear"],0.07)*capital_cost["nuclear"]*(1+0.033) # in $/MW
 marginal_cost_nuclear = marginal_cost["nuclear"] # in $/MWh_el
 n.add("Generator",
     "nuclear",
@@ -167,7 +176,7 @@ n.add("Generator",
     marginal_cost = marginal_cost_nuclear)
 
 # add hydro generator
-capital_cost_hydro = annuity(60,0.07)*capital_cost["hydro"]*(1+0.033) # in $/MW
+capital_cost_hydro = annuity(lifetime["hydro"],0.07)*capital_cost["hydro"]*(1+0.033) # in $/MW
 marginal_cost_hydro = marginal_cost["hydro"] # in $/MWh_el
 n.add("Generator",
     "hydro",
@@ -190,6 +199,11 @@ print(n.objective/1000000) #in 10^6 $
 print(f'Cost of electricity: {n.objective/n.loads_t.p_set.sum().sum():.2f} $/MWh')
 
 n.generators.p_nom_opt # in MW
+
+annual_generation = n.generators_t.p.sum().rename('MWh/year')
+print("\nAnnual generation by technology (MWh):")
+print(annual_generation.to_string())
+print(f"\nTotal: {annual_generation.sum():.0f} MWh")
 
 generators = ['hydro', 'nuclear', 'biomass', 'solar', 'offshorewind']
 gen_colors = {'hydro': 'royalblue', 'nuclear': 'mediumorchid', 'biomass': 'forestgreen',
@@ -236,5 +250,26 @@ plt.pie(sizes,
 plt.axis('equal')
 
 plt.title('Electricity mix', y=1.07)
+
+#%% Duration curves
+import numpy as np
+
+fig, ax = plt.subplots(figsize=(14, 5))
+
+for gen in generators:
+    sorted_dispatch = np.sort(n.generators_t.p[gen].values)[::-1]
+    hours = np.arange(1, len(sorted_dispatch) + 1)
+    ax.plot(hours, sorted_dispatch, color=gen_colors[gen], label=gen_labels[gen], linewidth=1.5)
+
+demand_sorted = np.sort(n.loads_t.p_set['load'].values)[::-1]
+ax.plot(np.arange(1, len(demand_sorted) + 1), demand_sorted,
+        color='black', linewidth=1.5, linestyle='--', label='Demand')
+
+ax.set_xlabel('Hours')
+ax.set_ylabel('Power [MW]')
+ax.set_title('Duration Curves')
+ax.legend(loc='upper right', fancybox=True, shadow=True)
+plt.tight_layout()
+plt.show()
 
 # %% 
