@@ -39,10 +39,11 @@ wind_state_to_region = {
 P_RATED = 3300  # kW
 
 # Power curve lookup table  (wind speed [m/s] → power [kW])
-pc_ws  = np.array([0,   3,   4,    5,    6,    7,     8,     9,    10,   11,   12,   13,   22,   25,  100])
-pc_kw  = np.array([0,   30,  150,  320,  640,  1050,  1500,  2100, 2800, 3150, 3300, 3300, 3300, 0,   0])
+pc_ws  = np.array([0,   3,   4,    5,    6,    7,     8,     9,    10,   11,   12,   13,   22,   25,  29, 30])
+pc_kw  = np.array([0,   42,  180,  412,  760,  1241,  1864,  2588, 3122, 3278, 3300, 3300, 3300, 3300, 3300,   0])
 
 HUB_HEIGHT = 100   # m
+
 REF_HEIGHT = 2      # m  (MERRA-2 wind speed measurement height)
 ALPHA      = 1/7    # Hellman exponent (neutral stability, open terrain)
 
@@ -68,6 +69,8 @@ wind_cf_hourly = df_wind_hub.apply(
 
 print("Wind CF yearly averages (power-curve model):")
 print(wind_cf_hourly.mean())
+print("Wind hub yearly averages:")
+print(df_wind_year.mean())
 
 
 #%% SOLAR CAPACITY FACTOR PROFILES — simplified irradiance-only model
