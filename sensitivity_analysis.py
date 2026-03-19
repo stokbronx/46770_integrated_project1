@@ -4,142 +4,83 @@ pd.options.mode.string_storage = "python"
 import numpy as np
 import pypsa
 import matplotlib.pyplot as plt
-from datapreparation import solar_cf_hourly
-
-#%% Wind CF generation from Portugal hourly profile + heatmap scaling
+from datapreparation import (
+    solar_cf_hourly, wind_cf_hourly,
+    df_irr, df_wind, df_demand_raw,
+    G_REF, pc_ws, pc_kw, P_RATED,
+    HUB_HEIGHT, REF_HEIGHT, ALPHA,
+)
 
 REGIONS = ["N", "NE", "SE", "S"]
-TARGET_CF = {"N": 0.277384, "NE": 0.491250, "SE": 0.426221, "S": 0.425513}
+YEARS = list(range(2005, 2025))
+MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 
-def generate_wind_cf(weather_year: int) -> pd.DataFrame:
-    """
-    Build hourly wind capacity factors for each Brazilian region using:
-      1. Portugal's hourly CF profile for the chosen weather_year
-      2. Heatmap scaling factors (hour-of-day x month) per region
-      3. Final scaling to match each region's long-term average CF
-    """
-    prt = pd.read_csv("Data/onshore_wind_1979-2017.csv", sep=";",
-                       index_col="utc_time", parse_dates=True)
-    prt_year = prt.loc[str(weather_year), "PRT"]
+#%% 20-year capacity factor statistics (2005–2024)
 
-    heatmaps = {}
+solar_monthly_all = {reg: pd.DataFrame(index=range(1, 13), columns=YEARS, dtype=float)
+                     for reg in REGIONS}
+wind_monthly_all  = {reg: pd.DataFrame(index=range(1, 13), columns=YEARS, dtype=float)
+                     for reg in REGIONS}
+
+for yr in YEARS:
+    yr_slice = slice(f"{yr}-01-01", f"{yr}-12-31")
+
+    irr_yr = df_irr.loc[yr_slice]
+    solar_cf_yr = (irr_yr / G_REF).clip(upper=1.0)
+
+    wind_yr = df_wind.loc[yr_slice]
+    wind_hub_yr = wind_yr * (HUB_HEIGHT / REF_HEIGHT) ** ALPHA
+    wind_cf_yr = wind_hub_yr.apply(lambda col: np.interp(col, pc_ws, pc_kw) / P_RATED)
+
     for reg in REGIONS:
-        hm = pd.read_csv(f"Data/heatmapData_{reg}.csv", index_col=0)
-        hm.index = hm.index.astype(int)
-        hm.columns = hm.columns.astype(int)
-        heatmaps[reg] = hm
-
-    result = pd.DataFrame(index=prt_year.index, columns=REGIONS, dtype=float)
-
-    for reg in REGIONS:
-        hm = heatmaps[reg]
-        scaled = prt_year.copy()
-        for t, cf in prt_year.items():
-            scaled.at[t] = cf * hm.loc[t.hour, t.month]
-
-        current_mean = scaled.mean()
-        if current_mean > 0:
-            scaled = scaled * (TARGET_CF[reg] / current_mean)
-
-        result[reg] = scaled.values
-
-    return result
+        solar_monthly_all[reg][yr] = solar_cf_yr[reg].groupby(solar_cf_yr.index.month).mean()
+        wind_monthly_all[reg][yr]  = wind_cf_yr[reg].groupby(wind_cf_yr.index.month).mean()
 
 
-def prepare_wind_cf_for_2024(wind_cf: pd.DataFrame) -> pd.DataFrame:
-    """Remap wind CF index to 2024, reindex to full leap year, interpolate Feb 29."""
-    wind_cf = wind_cf.copy()
-    wind_cf.index = wind_cf.index.map(lambda t: t.replace(year=2024))
-    full_idx = pd.date_range('2024-01-01', '2024-12-31 23:00', freq='h', tz='UTC')
-    return wind_cf.reindex(full_idx).interpolate()
+#%% Plot: monthly mean CF ± 1 std over 20 years
+
+fig, axes = plt.subplots(2, 4, figsize=(18, 8), sharey='row')
+
+for i, reg in enumerate(REGIONS):
+    ax_s = axes[0, i]
+    s_mean = solar_monthly_all[reg].mean(axis=1)
+    s_std  = solar_monthly_all[reg].std(axis=1)
+    ax_s.plot(range(1, 13), s_mean, 'o-', color='goldenrod', lw=2)
+    ax_s.fill_between(range(1, 13), s_mean - s_std, s_mean + s_std,
+                      color='gold', alpha=0.35)
+    ax_s.set_xticks(range(1, 13))
+    ax_s.set_xticklabels(MONTH_NAMES, rotation=45, fontsize=8)
+    ax_s.set_title(f'Solar — {reg}')
+    if i == 0:
+        ax_s.set_ylabel('Capacity Factor')
+
+    ax_w = axes[1, i]
+    w_mean = wind_monthly_all[reg].mean(axis=1)
+    w_std  = wind_monthly_all[reg].std(axis=1)
+    ax_w.plot(range(1, 13), w_mean, 's-', color='steelblue', lw=2)
+    ax_w.fill_between(range(1, 13), w_mean - w_std, w_mean + w_std,
+                      color='lightskyblue', alpha=0.45)
+    ax_w.set_xticks(range(1, 13))
+    ax_w.set_xticklabels(MONTH_NAMES, rotation=45, fontsize=8)
+    ax_w.set_title(f'Wind — {reg}')
+    if i == 0:
+        ax_w.set_ylabel('Capacity Factor')
+
+fig.suptitle('Monthly Capacity Factors — Mean ± 1σ  (2005–2024)', fontsize=14, y=1.01)
+plt.tight_layout()
+plt.show()
 
 
-#%% Prepare baseline solar CF (from datapreparation)
-solar_cf_baseline = solar_cf_hourly.copy()
-solar_cf_baseline.index = solar_cf_baseline.index.map(lambda t: t.replace(year=2024))
-if solar_cf_baseline.index.tz is None:
-    solar_cf_baseline.index = solar_cf_baseline.index.tz_localize('UTC')
-full_2024_index = pd.date_range('2024-01-01', '2024-12-31 23:00', freq='h', tz='UTC')
-solar_cf_baseline = solar_cf_baseline.reindex(full_2024_index).interpolate()
+#%% Load 2024 demand data (used for all optimization runs)
 
-
-#%% Generate solar CF from PS_037 inverter data
-
-def generate_solar_cf_ps037() -> pd.DataFrame:
-    """
-    Build hourly solar capacity factors for the SE region from PS_037 inverter data.
-    Uses actual hourly data for available months (Dec–Jun), preserving daily variability.
-    Missing months (Jul–Nov) are filled by mirroring around the winter solstice (Jun 21),
-    using averaged diurnal profiles only for those months.
-    """
-    RATED_CAPACITY_W = 2_000_000  # ~2 MW peak from 8 inverters
-
-    df = pd.read_csv("Data/PS_037.csv", parse_dates=["datetime"])
-    plant_power = df.groupby("datetime")["total_active_power_w"].sum()
-    plant_power.index = pd.to_datetime(plant_power.index, utc=True)
-
-    hourly_power = plant_power.resample("h").mean()
-    hourly_cf = (hourly_power / RATED_CAPACITY_W).clip(0, 1).fillna(0)
-
-    # Remap actual data to 2024: Dec 2024 stays Dec 2024, Jan–Jun 2025 → Jan–Jun 2024
-    hourly_cf_2024 = hourly_cf.copy()
-    hourly_cf_2024.index = hourly_cf_2024.index.map(lambda t: t.replace(year=2024))
-
-    full_idx = pd.date_range('2024-01-01', '2024-12-31 23:00', freq='h', tz='UTC')
-    cf_series = hourly_cf_2024.reindex(full_idx)
-
-    # Build averaged diurnal profiles for mirroring missing months (Jul–Nov)
-    profiles = hourly_cf.to_frame("cf")
-    profiles["month"] = profiles.index.month
-    profiles["hour"] = profiles.index.hour
-    diurnal = profiles.groupby(["month", "hour"])["cf"].mean()
-
-    mirror_map = {7: 6, 8: 5, 9: 4, 10: 3, 11: 2}
-    for missing_month, source_month in mirror_map.items():
-        if source_month in diurnal.index.get_level_values(0):
-            diurnal = pd.concat([diurnal, diurnal.loc[source_month].rename(
-                lambda h: (missing_month, h))])
-
-    # Fill only the NaN gaps (Jul–Nov) with mirrored average profiles
-    for t in full_idx:
-        if pd.isna(cf_series[t]):
-            try:
-                cf_series[t] = diurnal.loc[(t.month, t.hour)]
-            except KeyError:
-                cf_series[t] = 0.0
-
-    # # Scale to match the same annual mean CF as the baseline SE profile
-    # baseline_mean = solar_cf_baseline["SE"].mean()
-    # ps037_mean = cf_series.mean()
-    # if ps037_mean > 0:
-    #     cf_series = cf_series * (baseline_mean / ps037_mean)
-
-    # Create a full DataFrame with all regions (use baseline for N, NE, S)
-    result = solar_cf_baseline.copy()
-    result["SE"] = cf_series.values
-
-    return result
-
-
-solar_cf_ps037 = generate_solar_cf_ps037()
-
-print("Solar CF monthly means – SE region:")
-print("  Baseline vs PS_037:")
-comparison = pd.DataFrame({
-    "Baseline": solar_cf_baseline["SE"].resample("MS").mean(),
-    "PS_037":   solar_cf_ps037["SE"].resample("MS").mean(),
-})
-print(comparison.round(4))
-
-
-#%% Load demand data
-df_elec = pd.read_csv('data/demand_processed.csv', sep=',', index_col="din_instante")
-df_elec.index = pd.to_datetime(df_elec.index)
 region = 'SE'
-df_elec_SE = df_elec.loc[df_elec["region"] == region].drop(columns=["region"])
+demand_2024 = df_demand_raw.loc["2024"]
+demand_SE = demand_2024.loc[demand_2024["region"] == region, "demand_MW"].values
 
 #%% Model parameters
+
 capital_cost = dict(
     hydro=3750000,
     biomass=3750000,
@@ -166,20 +107,43 @@ def annuity(n, r):
         return 1 / n
 
 
-#%% Run optimization for a given scenario
+#%% Helper: compute CFs for a given weather year from raw Renewables Ninja data
 
-def run_model(weather_year: int, solar_data: pd.DataFrame, solver="gurobi"):
-    """Build and optimize the network for a given wind weather year and solar CF profile."""
-    wind_cf_raw = generate_wind_cf(weather_year)
-    wind_cf = prepare_wind_cf_for_2024(wind_cf_raw)
+def cf_for_year(year: int):
+    """Return (wind_cf, solar_cf) DataFrames with 2024 index for the given weather year."""
+    yr_slice = slice(f"{year}-01-01", f"{year}-12-31")
+
+    irr_yr = df_irr.loc[yr_slice]
+    solar_cf = (irr_yr / G_REF).clip(upper=1.0)
+
+    wind_yr = df_wind.loc[yr_slice]
+    wind_hub = wind_yr * (HUB_HEIGHT / REF_HEIGHT) ** ALPHA
+    wind_cf = wind_hub.apply(lambda col: np.interp(col, pc_ws, pc_kw) / P_RATED)
+
+    for cf in (solar_cf, wind_cf):
+        cf.index = cf.index.map(lambda t: t.replace(year=2024))
+        if cf.index.tz is None:
+            cf.index = cf.index.tz_localize('UTC')
+
+    full_idx = pd.date_range('2024-01-01', '2024-12-31 23:00', freq='h', tz='UTC')
+    solar_cf = solar_cf.reindex(full_idx).interpolate()
+    wind_cf  = wind_cf.reindex(full_idx).interpolate()
+
+    return wind_cf, solar_cf
+
+
+#%% Run optimization for a given weather year
+
+def run_model(weather_year: int, solver="gurobi"):
+    """Build and optimize the network for a given weather year."""
+    wind_cf, solar_cf = cf_for_year(weather_year)
 
     n = pypsa.Network()
     hours = pd.date_range('2024-01-01 00:00Z', '2024-12-31 23:00Z', freq='h')
     n.set_snapshots(hours.values)
     n.add("Bus", "electricity bus")
 
-    n.add("Load", "load", bus="electricity bus",
-          p_set=df_elec_SE["demand [MW]"].values)
+    n.add("Load", "load", bus="electricity bus", p_set=demand_SE)
 
     n.add("Carrier", "gas", co2_emissions=0.19)
     n.add("Carrier", "onshorewind")
@@ -191,7 +155,7 @@ def run_model(weather_year: int, solar_data: pd.DataFrame, solver="gurobi"):
           capital_cost=annuity(30, 0.07) * capital_cost["wind"] * (1 + 0.033),
           marginal_cost=0, p_max_pu=CF_wind.values)
 
-    CF_solar = solar_data[region][[h.strftime("%Y-%m-%dT%H:%M:%SZ") for h in n.snapshots]]
+    CF_solar = solar_cf[region][[h.strftime("%Y-%m-%dT%H:%M:%SZ") for h in n.snapshots]]
     n.add("Generator", "solar", bus="electricity bus",
           p_nom_extendable=True, carrier="solar",
           capital_cost=annuity(25, 0.07) * capital_cost["solar"] * (1 + 0.033),
@@ -217,23 +181,17 @@ def run_model(weather_year: int, solar_data: pd.DataFrame, solver="gurobi"):
     return n
 
 
-#%% Define scenarios: (label, wind_year, solar_data)
-scenarios = {
-    "2015 wind + baseline solar": (2015, solar_cf_baseline),
-    "2014 wind + baseline solar": (2014, solar_cf_baseline),
-    "2015 wind + PS_037 solar":   (2015, solar_cf_ps037),
-    "2014 wind + PS_037 solar":   (2014, solar_cf_ps037),
-}
+#%% Run optimizations across all 20 weather years
 
 results = {}
-for label, (wind_yr, solar_data) in scenarios.items():
+for yr in YEARS:
     print(f"\n{'='*60}")
-    print(f"  Running: {label}")
+    print(f"  Running: Weather year {yr}")
     print(f"{'='*60}")
-    results[label] = run_model(wind_yr, solar_data)
+    results[yr] = run_model(yr)
 
 
-#%% Compare results
+#%% Collect optimal capacities and generation across weather years
 
 gen_names = ['hydro', 'nuclear', 'biomass', 'solar', 'onshorewind']
 gen_labels_map = {'hydro': 'Hydro', 'nuclear': 'Nuclear', 'biomass': 'Biomass',
@@ -241,78 +199,84 @@ gen_labels_map = {'hydro': 'Hydro', 'nuclear': 'Nuclear', 'biomass': 'Biomass',
 gen_colors = {'hydro': 'royalblue', 'nuclear': 'mediumorchid', 'biomass': 'forestgreen',
               'solar': 'gold', 'onshorewind': 'dodgerblue'}
 
-# Optimal capacities
+cap_all = pd.DataFrame({yr: results[yr].generators.p_nom_opt[gen_names] for yr in YEARS})
+cap_all.index = [gen_labels_map[g] for g in gen_names]
+
+gen_all = pd.DataFrame({yr: results[yr].generators_t.p[gen_names].sum() for yr in YEARS})
+gen_all.index = [gen_labels_map[g] for g in gen_names]
+
+lcoe_all = pd.Series({yr: results[yr].objective / results[yr].loads_t.p_set.sum().sum()
+                       for yr in YEARS})
+
+
+#%% Print summary statistics
+
 print(f"\n{'='*60}")
-print("  OPTIMAL INSTALLED CAPACITIES (MW)")
+print("  OPTIMAL CAPACITY (MW) — Mean ± Std over 20 weather years")
 print(f"{'='*60}")
-cap_df = pd.DataFrame({label: results[label].generators.p_nom_opt for label in scenarios})
-cap_df.index = [gen_labels_map.get(g, g) for g in cap_df.index]
-print(cap_df.round(1))
+cap_stats = pd.DataFrame({'Mean': cap_all.mean(axis=1), 'Std': cap_all.std(axis=1)})
+print(cap_stats.round(1))
 
-# Annual generation
 print(f"\n{'='*60}")
-print("  ANNUAL GENERATION (MWh)")
+print("  ANNUAL GENERATION (TWh) — Mean ± Std over 20 weather years")
 print(f"{'='*60}")
-gen_df = pd.DataFrame({label: results[label].generators_t.p.sum() for label in scenarios})
-gen_df.index = [gen_labels_map.get(g, g) for g in gen_df.index]
-print(gen_df.round(0))
+gen_stats = pd.DataFrame({'Mean': gen_all.mean(axis=1) / 1e6, 'Std': gen_all.std(axis=1) / 1e6})
+print(gen_stats.round(2))
 
-# System cost
-print(f"\n{'='*60}")
-print("  SYSTEM COST")
-print(f"{'='*60}")
-for label in scenarios:
-    n = results[label]
-    total_load = n.loads_t.p_set.sum().sum()
-    print(f"  {label}: Total = {n.objective/1e6:.1f} M$, "
-          f"LCOE = {n.objective/total_load:.2f} $/MWh")
+print(f"\n  LCOE: {lcoe_all.mean():.2f} ± {lcoe_all.std():.2f} $/MWh")
 
 
-#%% Bar chart comparison
+#%% Plot: optimal capacity — mean ± 1σ across weather years
+
 fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
-cap_compare = pd.DataFrame({
-    label: results[label].generators.p_nom_opt[gen_names] for label in scenarios
-})
-cap_compare.index = [gen_labels_map[g] for g in gen_names]
-cap_compare.plot.bar(ax=axes[0], rot=0)
+# Capacity bar chart with error bars
+cap_mean = cap_all.mean(axis=1)
+cap_std  = cap_all.std(axis=1)
+x = np.arange(len(cap_mean))
+bar_colors = [gen_colors[g] for g in gen_names]
+axes[0].bar(x, cap_mean, yerr=cap_std, capsize=5,
+            color=bar_colors, edgecolor='black', linewidth=0.5)
+axes[0].set_xticks(x)
+axes[0].set_xticklabels(cap_mean.index, rotation=0)
 axes[0].set_ylabel('Installed Capacity [MW]')
-axes[0].set_title('Optimal Capacity by Scenario')
-axes[0].legend(fontsize=7, title='Scenario')
+axes[0].set_title('Optimal Capacity — Mean ± 1σ  (20 weather years)')
 
-gen_compare = pd.DataFrame({
-    label: results[label].generators_t.p[gen_names].sum() / 1e6 for label in scenarios
-})
-gen_compare.index = [gen_labels_map[g] for g in gen_names]
-gen_compare.plot.bar(ax=axes[1], rot=0)
+# Generation bar chart with error bars
+gen_mean = gen_all.mean(axis=1) / 1e6
+gen_std  = gen_all.std(axis=1) / 1e6
+axes[1].bar(x, gen_mean, yerr=gen_std, capsize=5,
+            color=bar_colors, edgecolor='black', linewidth=0.5)
+axes[1].set_xticks(x)
+axes[1].set_xticklabels(gen_mean.index, rotation=0)
 axes[1].set_ylabel('Annual Generation [TWh]')
-axes[1].set_title('Annual Generation by Scenario')
-axes[1].legend(fontsize=7, title='Scenario')
+axes[1].set_title('Annual Generation — Mean ± 1σ  (20 weather years)')
 
 plt.tight_layout()
 plt.show()
 
 
-#%% Dispatch comparison – summer and winter weeks (baseline solar vs PS_037, both using 2015 wind)
-summer_slice = slice('2024-01-07', '2024-01-13')
-winter_slice = slice('2024-07-01', '2024-07-07')
+#%% Plot: capacity per technology across weather years (scatter + mean line)
 
-compare_labels = ["2015 wind + baseline solar", "2015 wind + PS_037 solar"]
+fig, axes = plt.subplots(1, len(gen_names), figsize=(4 * len(gen_names), 5), sharey=False)
 
-for period_name, sl in [('Summer (Jan 7–13)', summer_slice), ('Winter (Jul 1–7)', winter_slice)]:
-    fig, axes = plt.subplots(1, 2, figsize=(16, 5), sharey=True)
-    for ax, label in zip(axes, compare_labels):
-        n = results[label]
-        dispatch = n.generators_t.p.loc[sl, gen_names]
-        ax.stackplot(dispatch.index, dispatch.values.T,
-                     labels=[gen_labels_map[g] for g in gen_names],
-                     colors=[gen_colors[g] for g in gen_names], alpha=0.85)
-        ax.plot(n.loads_t.p_set.loc[sl, 'load'], color='black', lw=1.5, label='Demand')
-        ax.set_ylabel('Power [MW]')
-        ax.set_title(f'{period_name}\n{label}')
-        ax.legend(loc='upper right', fontsize=7)
-    fig.autofmt_xdate()
-    plt.tight_layout()
-    plt.show()
+for i, gen in enumerate(gen_names):
+    ax = axes[i]
+    label = gen_labels_map[gen]
+    vals = cap_all.loc[label]
+    ax.scatter(YEARS, vals, color=gen_colors[gen], s=30, zorder=3)
+    ax.axhline(vals.mean(), color=gen_colors[gen], ls='--', lw=1.5, label=f'Mean = {vals.mean():.0f} MW')
+    ax.fill_between(YEARS, vals.mean() - vals.std(), vals.mean() + vals.std(),
+                    color=gen_colors[gen], alpha=0.15, label=f'± 1σ = {vals.std():.0f} MW')
+    ax.set_title(label)
+    ax.set_xlabel('Weather Year')
+    if i == 0:
+        ax.set_ylabel('Optimal Capacity [MW]')
+    ax.legend(fontsize=7, loc='best')
+    ax.tick_params(axis='x', rotation=45)
+
+plt.suptitle('Optimal Capacity Sensitivity to Weather Year', fontsize=13, y=1.01)
+plt.tight_layout()
+plt.show()
 
 # %%

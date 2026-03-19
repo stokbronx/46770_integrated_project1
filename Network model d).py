@@ -1,7 +1,10 @@
 #%% # loading of data and libraries
 import pandas as pd
-pd.options.mode.string_storage = "python"
+#pd.options.mode.string_storage = "python"
+
 import pypsa
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
     wind_cf_hourly, solar_cf_hourly,)
@@ -15,21 +18,37 @@ network.add(
     nice_name=["Hydro", "Biomass", "Nuclear", "Wind", "Solar"],
     color=["aquamarine", "sienna", "purple", "dodgerblue", "gold"]
 )
-network.add("Carrier", ["electricity", "AC"])
+network.add("Carrier", "AC")
 
-network.add("Bus", "bus BRA-N", v_nom=400000.0, carrier="electricity") # V
-network.add("Bus", "bus BRA-NE", v_nom=400000.0, carrier="electricity") # V
-network.add("Bus", "bus BRA-S", v_nom=400000.0, carrier="electricity") # V
-network.add("Bus", "bus BRA-SE", v_nom=400000.0, carrier="electricity") # V
+
+network.add("Bus", "bus BRA-N",
+            v_nom=400.0,
+            carrier="AC",
+            x=-60.0, y=-3.0)
+
+network.add("Bus", "bus BRA-NE",
+            v_nom=400.0,
+            carrier="AC",
+            x=-38.5, y=-12.9)
+
+network.add("Bus", "bus BRA-SE",
+            v_nom=400.0,
+            carrier="AC",
+            x=-46.6, y=-23.5)
+
+network.add("Bus", "bus BRA-S",
+            v_nom=400.0,
+            carrier="AC",
+            x=-51.2, y=-30.0)
 network.buses
 
 # Adding the network lines between the buses
-network.add("Line"," line N-NE", bus0 = "bus BRA-N", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC")
-network.add("Line"," line NE-SE", bus0 = "bus BRA-NE", bus1= "bus BRA-SE", x=0.1, r=0.01, carrier="AC")
-network.add("Line"," line SE-S", bus0 = "bus BRA-SE", bus1= "bus BRA-S", x=0.1, r=0.01, carrier="AC")
-network.add("Line"," line SE-N", bus0 = "bus BRA-SE", bus1= "bus BRA-N", x=0.1, r=0.01, carrier="AC")
-network.add("Line"," line S-NE", bus0 = "bus BRA-S", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC")
-
+network.add("Line"," line N-NE", bus0 = "bus BRA-N", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC",s_nom=1100) 
+network.add("Line"," line NE-SE", bus0 = "bus BRA-NE", bus1= "bus BRA-SE", x=0.1, r=0.01, carrier="AC",s_nom=1100)
+network.add("Line"," line SE-S", bus0 = "bus BRA-SE", bus1= "bus BRA-S", x=0.1, r=0.01, carrier="AC",s_nom=1100)
+network.add("Line"," line SE-N", bus0 = "bus BRA-SE", bus1= "bus BRA-N", x=0.1, r=0.01, carrier="AC",s_nom=1100)
+network.add("Line"," line S-NE", bus0 = "bus BRA-S", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC",s_nom=1100)
+# x is the reactance, r is the resistance(In actuality equal to zero), s_nom is the nominal apparent power in VA
 
 # %% Adding the generators to the network
 power_plants = { 
@@ -56,10 +75,10 @@ for region, tech_shares in share.items():
         regional_power_plants[region][tech] = total_cap[tech] * share_fraction
 # lifetime of the technologies
 tech_lifetime = {
-    "hydro": 60,
+    "hydro": 65,
     "biomass": 25,
-    "nuclear": 60,
-    "wind": 30,
+    "nuclear": 50,
+    "wind": 25,
     "solar": 25,
 }
 # Add costs
@@ -71,7 +90,7 @@ capital_cost = dict(
     #coal=1000,
     biomass=3750000, # $/MW
     nuclear=7500000, # $/MW
-    wind=2100000, # $/MW
+    wind=2100000, # $/MW (onshore)
     solar=1250000, # $/MW
 )
 
@@ -79,7 +98,7 @@ capital_cost = dict(
 
 #MARGINAL COSTS (Needs to be updated with data from litterature)
 marginal_cost = dict(
-    hydro=5, # $/MWh
+    hydro=3, # $/MWh
     #gas=1000,
     #coal=100,
     biomass=75, # $/MWh
@@ -139,7 +158,7 @@ for region, tech_caps in regional_power_plants.items():
             f"{region} {tech}",
             bus=f"bus {region}",
             carrier=tech,
-            p_nom=p_nom,
+            p_nom=0,  # Start with zero capacity for optimization
             p_nom_extendable=True,
             capital_cost=cap_cost,
             marginal_cost=marg_cost,
@@ -205,6 +224,25 @@ print("Demand timestamps:", demand_north.index[:10])
 print("Snapshot timestamps:", network.snapshots[:10])
 
 # %%
+def fix_string_columns(df):
+    for col in df.columns:
+        if pd.api.types.is_string_dtype(df[col]):
+            df[col] = df[col].astype("object")
+
+# Apply to all relevant PyPSA component tables
+for table in [
+    network.buses,
+    network.lines,
+    network.generators,
+    network.loads,
+    network.carriers,
+    network.links,
+]:
+    fix_string_columns(table)
+
+
+
+# %%
 network.optimize()
 
 # %%
@@ -213,4 +251,14 @@ print("Total system cost:", network.statistics.system_cost())
 print("Total capex:", network.statistics.capex())
 print("Total opex:", network.statistics.opex())
 # %%
-network.generators.p_nom_opt
+network.generators.p_nom_opt # Optimal capacities of the generators
+# %%
+network.generators_t.p # Optimal dispatch of the generators over time
+#%% 
+network.lines_t.p0 # The active power flow on the lines can now be seen
+
+# %% ###########################3 Plotting of the network ############################
+
+network.plot(margin=1, bus_sizes=2.0)
+
+# %%
