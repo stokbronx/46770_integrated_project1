@@ -1,7 +1,10 @@
 #%% # loading of data and libraries
 import pandas as pd
-pd.options.mode.string_storage = "python"
+#pd.options.mode.string_storage = "python"
+
 import pypsa
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
     wind_cf_hourly, solar_cf_hourly,)
@@ -18,10 +21,25 @@ network.add(
 network.add("Carrier", "AC")
 
 
-network.add("Bus", "bus BRA-N", v_nom=400.0, carrier="AC") # V
-network.add("Bus", "bus BRA-NE", v_nom=400.0, carrier="AC") # V
-network.add("Bus", "bus BRA-S", v_nom=400.0, carrier="AC") # V
-network.add("Bus", "bus BRA-SE", v_nom=400.0, carrier="AC") # V
+network.add("Bus", "bus BRA-N",
+            v_nom=400.0,
+            carrier="AC",
+            x=-60.0, y=-3.0)
+
+network.add("Bus", "bus BRA-NE",
+            v_nom=400.0,
+            carrier="AC",
+            x=-38.5, y=-12.9)
+
+network.add("Bus", "bus BRA-SE",
+            v_nom=400.0,
+            carrier="AC",
+            x=-46.6, y=-23.5)
+
+network.add("Bus", "bus BRA-S",
+            v_nom=400.0,
+            carrier="AC",
+            x=-51.2, y=-30.0)
 network.buses
 
 # Adding the network lines between the buses
@@ -30,7 +48,7 @@ network.add("Line"," line NE-SE", bus0 = "bus BRA-NE", bus1= "bus BRA-SE", x=0.1
 network.add("Line"," line SE-S", bus0 = "bus BRA-SE", bus1= "bus BRA-S", x=0.1, r=0.01, carrier="AC",s_nom=1100)
 network.add("Line"," line SE-N", bus0 = "bus BRA-SE", bus1= "bus BRA-N", x=0.1, r=0.01, carrier="AC",s_nom=1100)
 network.add("Line"," line S-NE", bus0 = "bus BRA-S", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC",s_nom=1100)
-# x is the reactance, r is the resistance, s_nom is the nominal apparent power in VA
+# x is the reactance, r is the resistance(In actuality equal to zero), s_nom is the nominal apparent power in VA
 
 # %% Adding the generators to the network
 power_plants = { 
@@ -206,6 +224,25 @@ print("Demand timestamps:", demand_north.index[:10])
 print("Snapshot timestamps:", network.snapshots[:10])
 
 # %%
+def fix_string_columns(df):
+    for col in df.columns:
+        if pd.api.types.is_string_dtype(df[col]):
+            df[col] = df[col].astype("object")
+
+# Apply to all relevant PyPSA component tables
+for table in [
+    network.buses,
+    network.lines,
+    network.generators,
+    network.loads,
+    network.carriers,
+    network.links,
+]:
+    fix_string_columns(table)
+
+
+
+# %%
 network.optimize()
 
 # %%
@@ -217,9 +254,11 @@ print("Total opex:", network.statistics.opex())
 network.generators.p_nom_opt # Optimal capacities of the generators
 # %%
 network.generators_t.p # Optimal dispatch of the generators over time
-# %%
-network.lpf()
 #%% 
 network.lines_t.p0 # The active power flow on the lines can now be seen
+
+# %% ###########################3 Plotting of the network ############################
+
+network.plot(margin=1, bus_sizes=2.0)
 
 # %%
