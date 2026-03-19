@@ -93,15 +93,15 @@ n.add("Carrier", "gas", co2_emissions=0.19) # in t_CO2/MWh_th
 n.add("Carrier", "onshorewind")
 n.add("Carrier", "solar")
 
-# add off shore wind generator
+# add onshore wind generator
 CF_wind = wind_cf_hourly[region][[hour.strftime("%Y-%m-%dT%H:%M:%SZ") for hour in n.snapshots]]
-capital_cost_offshorewind = annuity(lifetime["wind"],0.07)*capital_cost["wind"]*(1+0.033) # in $/MW
+capital_cost_onshorewind = annuity(lifetime["wind"],0.07)*capital_cost["wind"]*(1+0.033) # in $/MW
 n.add("Generator",
-    "offshorewind",
+    "onshorewind",
     bus="electricity bus",
     p_nom_extendable=True,
-    carrier="offshorewind",
-    capital_cost = capital_cost_offshorewind,
+    carrier="onshorewind",
+    capital_cost = capital_cost_onshorewind,
     marginal_cost = 0,
     p_max_pu = CF_wind.values)
 
@@ -170,22 +170,26 @@ print("\nAnnual generation by technology (MWh):")
 print(annual_generation.to_string())
 print(f"\nTotal: {annual_generation.sum():.0f} MWh")
 
-generators = ['hydro', 'nuclear', 'biomass', 'solar', 'offshorewind']
+generators = ['hydro', 'nuclear', 'biomass', 'solar', 'onshorewind']
 gen_colors = {'hydro': 'royalblue', 'nuclear': 'mediumorchid', 'biomass': 'forestgreen',
-              'solar': 'gold', 'offshorewind': 'dodgerblue'}
+              'solar': 'gold', 'onshorewind': 'dodgerblue'}
 gen_labels = {'hydro': 'Hydro', 'nuclear': 'Nuclear', 'biomass': 'Biomass',
-              'solar': 'Solar', 'offshorewind': 'Onshore Wind'}
+              'solar': 'Solar', 'onshorewind': 'Onshore Wind'}
 
 # Summer week (Jan in southern hemisphere) and winter week (Jul)
 summer_slice = slice('2024-01-07', '2024-01-13')
 winter_slice = slice('2024-07-01', '2024-07-07')
 
+dispatch_filenames = {'Summer (Jan 7–13)': 'figures/dispatch_summer.png',
+                      'Winter (Jul 1–7)': 'figures/dispatch_winter.png'}
+
 for period_name, sl in [('Summer (Jan 7–13)', summer_slice), ('Winter (Jul 1–7)', winter_slice)]:
     fig, ax = plt.subplots(figsize=(14, 5))
     dispatch = n.generators_t.p.loc[sl, generators]
-    ax.stackplot(dispatch.index, dispatch.values.T,
-                 labels=[gen_labels[g] for g in generators],
-                 colors=[gen_colors[g] for g in generators], alpha=0.85)
+    active = [g for g in generators if dispatch[g].sum() > 0]
+    ax.stackplot(dispatch.index, dispatch[active].values.T,
+                 labels=[gen_labels[g] for g in active],
+                 colors=[gen_colors[g] for g in active], alpha=0.85)
     ax.plot(n.loads_t.p_set.loc[sl, 'load'], color='black', linewidth=1.5, label='Demand')
     ax.set_ylabel('Power [MW]')
     ax.set_xlabel('Time')
@@ -193,20 +197,24 @@ for period_name, sl in [('Summer (Jan 7–13)', summer_slice), ('Winter (Jul 1�
     ax.legend(loc='upper right', fancybox=True, shadow=True)
     fig.autofmt_xdate()
     plt.tight_layout()
+    fig.savefig(dispatch_filenames[period_name], dpi=300, bbox_inches='tight')
     plt.show()
 
-labels = ['offshore wind',
-          'solar',
-          'biomass',
-          'nuclear',
-          'hydro']
-sizes = [n.generators_t.p['offshorewind'].sum(),
-         n.generators_t.p['solar'].sum(),
-         n.generators_t.p['biomass'].sum(),
-         n.generators_t.p['nuclear'].sum(),
-         n.generators_t.p['hydro'].sum()]
+pie_data = {
+    'onshore wind': n.generators_t.p['onshorewind'].sum(),
+    'solar':        n.generators_t.p['solar'].sum(),
+    'biomass':      n.generators_t.p['biomass'].sum(),
+    'nuclear':      n.generators_t.p['nuclear'].sum(),
+    'hydro':        n.generators_t.p['hydro'].sum(),
+}
+pie_colors_map = {
+    'onshore wind': 'blue', 'solar': 'orange', 'biomass': 'brown',
+    'nuclear': 'green', 'hydro': 'red',
+}
 
-colors=['blue', 'orange', 'brown', 'green', 'red']
+labels = [k for k, v in pie_data.items() if v > 0]
+sizes  = [v for v in pie_data.values() if v > 0]
+colors = [pie_colors_map[k] for k in labels]
 
 plt.pie(sizes,
         colors=colors,
@@ -215,6 +223,7 @@ plt.pie(sizes,
 plt.axis('equal')
 
 plt.title('Electricity mix', y=1.07)
+plt.savefig('figures/electicity_mix.png', dpi=300, bbox_inches='tight')
 
 #%% Duration curves
 import numpy as np
@@ -235,6 +244,7 @@ ax.set_ylabel('Power [MW]')
 ax.set_title('Duration Curves')
 ax.legend(loc='upper right', fancybox=True, shadow=True)
 plt.tight_layout()
+fig.savefig('figures/duration_curve.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # %% 
