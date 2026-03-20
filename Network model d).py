@@ -119,13 +119,16 @@ def annuity(n,r):
 
 #%% Mapping from network region names to CF DataFrame columns
 # Fix timestamps
+# Convert index to datetime
 wind_cf_hourly.index = pd.to_datetime(wind_cf_hourly.index).tz_localize(None)
 solar_cf_hourly.index = pd.to_datetime(solar_cf_hourly.index).tz_localize(None)
 
-# Align solar year to wind year
-solar_cf_hourly.index = solar_cf_hourly.index.map(lambda t: t.replace(year=2015)) 
-# Since solar cf is from 2025 we need to align it with the year 2015 this needs to be changed later on
+# Select only year 2020
+wind_cf_hourly = wind_cf_hourly.loc["2020"]
+solar_cf_hourly = solar_cf_hourly.loc["2020"]
 
+# Set network snapshots
+network.snapshots = wind_cf_hourly.index
 # Set snapshots
 network.snapshots = wind_cf_hourly.index
 region_cf_map = {
@@ -165,35 +168,6 @@ for region, tech_caps in regional_power_plants.items():
             p_max_pu=p_max_pu
         )
 # %% Now the loads are added to the network
-df_demand = pd.read_csv(
-    "Data/demand_processed.csv",
-    parse_dates=["din_instante"],
-    index_col="din_instante"
-)
-# Determine year difference between demand and snapshots
-demand_year = df_demand.index[0].year
-snapshot_year = network.snapshots[0].year
-year_shift = snapshot_year - demand_year
-
-# Shift demand timestamps by the year difference
-df_demand.index = df_demand.index + pd.DateOffset(years=year_shift)
-# align year to snapshots (2015)
-df_demand.index = df_demand.index.map(lambda t: t.replace(year=2015))
-
-
-def clean_demand(df, region_code):
-    df_region = df.loc[df["region"] == region_code].copy()
-    df_region.index = df_region.index.tz_localize(None)
-    
-    demand = df_region["demand [MW]"]
-    demand = demand.groupby(demand.index).mean()  # collapse duplicates
-
-    return demand
-
-demand_north      = clean_demand(df_demand, "N")
-demand_south      = clean_demand(df_demand, "S")
-demand_north_east = clean_demand(df_demand, "NE")
-demand_south_east = clean_demand(df_demand, "SE")
 
 demand = {
     "BRA-N": demand_north,
