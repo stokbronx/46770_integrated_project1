@@ -90,7 +90,7 @@ capital_cost = dict(
     #coal=1000,
     biomass=3750000, # $/MW
     nuclear=7500000, # $/MW
-    wind=2100000, # $/MW This value needs to be changed. Is currently offshore but should be changed to onshore
+    wind=2100000, # $/MW (onshore)
     solar=1250000, # $/MW
 )
 
