@@ -51,7 +51,7 @@ network.add("Line"," line S-NE", bus0 = "bus BRA-S", bus1= "bus BRA-NE", x=0.1, 
 # x is the reactance, r is the resistance(In actuality equal to zero), s_nom is the nominal apparent power in VA
 
 # %% Adding the generators to the network
-power_plants = { 
+"""power_plants = { 
     "BRA": {"hydro": 110000, "biomass": 46500, "nuclear": 2000, "wind": 29500, "solar": 48500},
 } #####These capacities needs to be changed when the optimal values are found############
 
@@ -62,17 +62,7 @@ share = { #####These shares needs to be changed when the optimal values are foun
     "BRA-SE": {"hydro": 0.9, "biomass": 0.7, "nuclear": 0.8, "wind": 0.9, "solar": 1.0},
 }
 # Total Brazilian capacities
-max_capacity_hydro = 40000 #GW
-
-total_cap = power_plants["BRA"]
-
-# Create regional power plant dictionary
-regional_power_plants = {}
-
-for region, tech_shares in share.items():
-    regional_power_plants[region] = {}
-    for tech, share_fraction in tech_shares.items():
-        regional_power_plants[region][tech] = total_cap[tech] * share_fraction
+"""
 # lifetime of the technologies
 tech_lifetime = {
     "hydro": 65,
@@ -123,10 +113,6 @@ def annuity(n,r):
 wind_cf_hourly.index = pd.to_datetime(wind_cf_hourly.index).tz_localize(None)
 solar_cf_hourly.index = pd.to_datetime(solar_cf_hourly.index).tz_localize(None)
 
-# Select only year 2020
-wind_cf_hourly = wind_cf_hourly.loc["2020"]
-solar_cf_hourly = solar_cf_hourly.loc["2020"]
-
 # Set network snapshots
 network.snapshots = wind_cf_hourly.index
 # Set snapshots
@@ -137,32 +123,42 @@ region_cf_map = {
     "BRA-NE": "NE",
     "BRA-SE": "SE"
 }
+technologies = ["hydro", "biomass", "nuclear", "wind", "solar"]
+regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
+hydro_cap = { # Introduction a max capacity on hydro power
+    "BRA-N": 40000, # MW
+    "BRA-NE": 40000,
+    "BRA-SE": 40000,
+    "BRA-S": 40000
+}
 network.snapshots = pd.to_datetime(wind_cf_hourly.index).tz_localize(None)
-for region, tech_caps in regional_power_plants.items():
-    for tech, p_nom in tech_caps.items():
+for region in regions:
+    for tech in technologies:
 
-        # Annualized capital cost
         lifetime = tech_lifetime[tech]
         cap_cost = annuity(lifetime, 0.07) * capital_cost[tech] * (1 + 0.033)
-
-        # Marginal cost
         marg_cost = marginal_cost[tech]
 
-        # Capacity factor time series for wind/solar
         if tech in ["wind", "solar"]:
             CF = {"wind": wind_cf_hourly, "solar": solar_cf_hourly}[tech][region_cf_map[region]]
             p_max_pu = CF.reindex(network.snapshots).fillna(0).values
         else:
             p_max_pu = None
 
-        # Add generator
+        # Hydro capacity constraint
+        if tech == "hydro":
+            p_nom_max = hydro_cap[region]
+        else:
+            p_nom_max = None
+
         network.add(
             "Generator",
             f"{region} {tech}",
             bus=f"bus {region}",
             carrier=tech,
-            p_nom=0,  # Start with zero capacity for optimization
+            p_nom=0,
             p_nom_extendable=True,
+            p_nom_max=p_nom_max,
             capital_cost=cap_cost,
             marginal_cost=marg_cost,
             p_max_pu=p_max_pu
@@ -217,13 +213,23 @@ for table in [
 
 
 # %%
-network.optimize()
+network.optimize(solver_name="gurobi")
 
 # %%
 print("Objective value:", network.objective)
 print("Total system cost:", network.statistics.system_cost())
 print("Total capex:", network.statistics.capex())
 print("Total opex:", network.statistics.opex())
+#%% Calculation of imbalance in the grid at the first timestep
+t0 = network.snapshots[0]
+
+gen_bus = network.generators_t.p.loc[t0].groupby(network.generators.bus).sum()
+load_bus = network.loads_t.p.loc[t0].groupby(network.loads.bus).sum()
+
+imbalance = gen_bus.sub(load_bus, fill_value=0)
+
+print("Nodal imbalance at first timestep (MW):")
+print(imbalance)
 # %%
 network.generators.p_nom_opt # Optimal capacities of the generators
 # %%
