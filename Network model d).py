@@ -220,6 +220,19 @@ print("Objective value:", network.objective)
 print("Total system cost:", network.statistics.system_cost())
 print("Total capex:", network.statistics.capex())
 print("Total opex:", network.statistics.opex())
+
+# %%
+network.generators.p_nom_opt # Optimal capacities of the generators
+# %%
+network.generators_t.p # Optimal dispatch of the generators over time
+#%% 
+network.lines_t.p0 # The active power flow on the lines can now be seen
+
+# %% ###########################3 Plotting of the network ############################
+
+#network.plot(margin=1, bus_sizes=2.0)
+
+# %%
 #%% Calculation of imbalance in the grid at the first timestep
 t0 = network.snapshots[0]
 
@@ -230,15 +243,7 @@ imbalance = gen_bus.sub(load_bus, fill_value=0)
 
 print("Nodal imbalance at first timestep (MW):")
 print(imbalance)
-# %%
-network.generators.p_nom_opt # Optimal capacities of the generators
-# %%
-network.generators_t.p # Optimal dispatch of the generators over time
-#%% 
-network.lines_t.p0 # The active power flow on the lines can now be seen
+network.lines_t.p0.loc[t0]
 
-# %% ###########################3 Plotting of the network ############################
-
-network.plot(margin=1, bus_sizes=2.0)
 
 # %%
