@@ -1,7 +1,7 @@
 #%% # loading of data and libraries
 import pandas as pd
 #pd.options.mode.string_storage = "python"
-
+import numpy as np
 import pypsa
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
@@ -231,7 +231,29 @@ network.lines_t.p0.sum() # The active power flow on the lines can now be seen
 
 # %% ###########################3 Plotting of the network ############################
 
-fig, ax = plt.subplots(figsize=(8, 8), subplot_kw={"projection": ccrs.PlateCarree()})
+
+bus_labels = {
+    "bus BRA-N": "N",
+    "bus BRA-NE": "NE",
+    "bus BRA-SE": "SE",
+    "bus BRA-S": "S",
+}
+
+# Total annual production per bus (MWh)
+gen_per_bus = network.generators_t.p.sum().groupby(network.generators.bus).sum()
+
+# Bus sizes proportional to total production, scaled for visibility
+bus_sizes = gen_per_bus / gen_per_bus.max() * 0.15
+
+# Net annual energy flow per line (MWh); positive = bus0 → bus1
+line_net_flow = network.lines_t.p0.sum()
+line_abs_flow = network.lines_t.p0.abs().sum()
+
+# Line widths proportional to absolute transported energy
+lw_min, lw_max = 1.5, 10
+line_widths = lw_min + (line_abs_flow / line_abs_flow.max()) * (lw_max - lw_min)
+
+fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={"projection": ccrs.PlateCarree()})
 ax.set_extent([-75, -30, -35, 7], crs=ccrs.PlateCarree())
 ax.add_feature(cfeature.LAND, facecolor="whitesmoke")
 ax.add_feature(cfeature.OCEAN, facecolor="lightcyan")
@@ -239,9 +261,69 @@ ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
 ax.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle="--")
 ax.add_feature(cfeature.STATES, linewidth=0.3, edgecolor="gray")
 
-network.plot(ax=ax, bus_sizes=0.1, line_widths=2, margin=0.2,
-             bus_colors="red", line_colors="steelblue",
-             title="Brazilian Power Network")
+network.plot(
+    ax=ax,
+    bus_sizes=bus_sizes,
+    line_widths=line_widths,
+    margin=0.2,
+    bus_colors="tomato",
+    line_colors="steelblue",
+    title="Brazilian Power Network",
+)
+
+# Annotate each bus with its name and annual production
+for bus_name, label in bus_labels.items():
+    bx = network.buses.loc[bus_name, "x"]
+    by = network.buses.loc[bus_name, "y"]
+    prod_twh = gen_per_bus[bus_name] / 1e6
+    ax.annotate(
+        f"{label}\n{prod_twh:.1f} TWh",
+        xy=(bx, by),
+        xytext=(15, 15),
+        textcoords="offset points",
+        fontsize=11,
+        fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="gray", alpha=0.85),
+        transform=ccrs.PlateCarree(),
+    )
+
+# Annotate each line with directional energy flow
+label_offsets = {
+    " line N-NE":  (0, 12),
+    " line NE-SE": (12, 0),
+    " line SE-S":  (12, 0),
+    " line SE-N":  (-14, -10),
+    " line S-NE":  (-14, 10),
+}
+
+for line_name in network.lines.index:
+    bus0 = network.lines.loc[line_name, "bus0"]
+    bus1 = network.lines.loc[line_name, "bus1"]
+    net = line_net_flow[line_name]
+
+    x0, y0 = network.buses.loc[bus0, "x"], network.buses.loc[bus0, "y"]
+    x1, y1 = network.buses.loc[bus1, "x"], network.buses.loc[bus1, "y"]
+    mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+
+    if net >= 0:
+        arrow = f"{bus_labels[bus0]}\u2192{bus_labels[bus1]}"
+    else:
+        arrow = f"{bus_labels[bus1]}\u2192{bus_labels[bus0]}"
+        net = -net
+
+    flow_twh = net / 1e6
+    ox, oy = label_offsets.get(line_name, (0, 0))
+    ax.annotate(
+        f"{arrow}  {flow_twh:.1f} TWh",
+        xy=(mx, my),
+        xytext=(ox, oy),
+        textcoords="offset points",
+        fontsize=9,
+        ha="center",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="lightyellow", edgecolor="gray", alpha=0.9),
+        transform=ccrs.PlateCarree(),
+    )
+
 plt.tight_layout()
 plt.show()
 
