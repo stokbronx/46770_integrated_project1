@@ -227,7 +227,7 @@ network.generators.p_nom_opt # Optimal capacities of the generators
 # %%
 network.generators_t.p # Optimal dispatch of the generators over time
 #%% 
-network.lines_t.p0 # The active power flow on the lines can now be seen
+network.lines_t.p0.sum() # The active power flow on the lines can now be seen
 
 # %% ###########################3 Plotting of the network ############################
 
@@ -258,5 +258,187 @@ print("Nodal imbalance at first timestep (MW):")
 print(imbalance)
 network.lines_t.p0.loc[t0]
 
+
+#%% Plotting two pies with identical size
+
+#%% Plotting two pies side by side with swapped order
+
+technologies = ["wind", "solar", "biomass", "nuclear", "hydro"]
+
+# Colors
+pie_colors_map = {
+    'wind': 'dodgerblue',
+    'solar': 'gold',
+    'biomass': 'green',
+    'nuclear': 'purple',
+    'hydro': 'royalblue'
+}
+
+# Create figure with 1 row, 2 columns
+fig, axes = plt.subplots(1, 2, figsize=(14,7))
+
+# -------------------
+# Pie 1: Installed Capacity (now on the left)
+# -------------------
+pie_data_capacity = {}
+for tech in technologies:
+    gens = network.generators.index[network.generators.carrier == tech]
+    pie_data_capacity[tech] = network.generators.p_nom_opt[gens].sum()
+
+labels = [k for k, v in pie_data_capacity.items() if v > 0]
+sizes  = [v for v in pie_data_capacity.values() if v > 0]
+colors = [pie_colors_map[k] for k in labels]
+
+axes[0].pie(
+    sizes,
+    radius=1,               # fixed radius
+    colors=colors,
+    labels=labels,
+    autopct="%1.1f%%",
+    wedgeprops={'linewidth':0}
+)
+axes[0].set_aspect('equal')
+axes[0].set_title("Installed Capacity Mix")
+
+# -------------------
+# Pie 2: Dispatch (now on the right)
+# -------------------
+pie_data_dispatch = {}
+for tech in technologies:
+    gens = network.generators.index[network.generators.carrier == tech]
+    pie_data_dispatch[tech] = network.generators_t.p[gens].sum().sum()
+
+labels = [k for k, v in pie_data_dispatch.items() if v > 0]
+sizes  = [v for v in pie_data_dispatch.values() if v > 0]
+colors = [pie_colors_map[k] for k in labels]
+
+axes[1].pie(
+    sizes,
+    radius=1,               # fixed radius
+    colors=colors,
+    labels=labels,
+    autopct="%1.1f%%",
+    wedgeprops={'linewidth':0}
+)
+axes[1].set_aspect('equal')
+axes[1].set_title("Electricity Mix (Dispatch)")
+
+plt.tight_layout()
+plt.show()
+# %%
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# List of technologies and regions
+technologies = ["hydro", "biomass", "nuclear", "wind", "solar"]
+regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
+
+# Colors per technology
+colors_map = {
+    'wind': 'dodgerblue',
+    'solar': 'gold',
+    'biomass': 'green',
+    'nuclear': 'purple',
+    'hydro': 'royalblue'
+}
+
+# ------------------------
+# 1️⃣ Histogram: Optimal Capacities
+# ------------------------
+capacity_data = []
+
+for region in regions:
+    for tech in technologies:
+        gens = network.generators.index[
+            (network.generators.carrier == tech) & (network.generators.bus == f"bus {region}")
+        ]
+        if len(gens) > 0:
+            cap = network.generators.p_nom_opt[gens].sum()
+            if cap > 0:  # omit zero capacities
+                capacity_data.append({"Region": region, "Technology": tech, "Capacity": cap})
+
+df_capacity = pd.DataFrame(capacity_data)
+
+plt.figure(figsize=(10,6))
+for tech in technologies:
+    df_plot = df_capacity[df_capacity["Technology"] == tech]
+    plt.bar(df_plot["Region"], df_plot["Capacity"], bottom=df_capacity[df_capacity["Technology"].isin(
+        [t for t in technologies if technologies.index(t) < technologies.index(tech)]
+    )]["Capacity"].groupby(df_capacity["Region"]).sum().reindex(df_plot["Region"]).fillna(0), 
+    color=colors_map[tech], label=tech)
+
+plt.ylabel("Optimal Capacity (MW)")
+plt.xlabel("Region")
+plt.title("Optimal Installed Capacity per Region")
+plt.legend(title="Technology")
+plt.tight_layout()
+plt.show()
+
+
+
+# %%
+
+technologies = ["hydro", "biomass", "nuclear", "wind", "solar"]
+regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
+
+# Colors per technology
+colors_map = {
+    'wind': 'dodgerblue',
+    'solar': 'gold',
+    'biomass': 'green',
+    'nuclear': 'purple',
+    'hydro': 'royalblue'
+}
+
+# ------------------------
+# Dispatch Data (sum over all time steps)
+# ------------------------
+dispatch_data = []
+for region in regions:
+    for tech in technologies:
+        gens = network.generators.index[
+            (network.generators.carrier == tech) & (network.generators.bus == f"bus {region}")
+        ]
+        if len(gens) > 0:
+            # sum dispatch over all snapshots
+            disp = network.generators_t.p[gens].sum().sum()
+            if disp > 0:  # omit zero dispatch
+                dispatch_data.append({"Region": region, "Technology": tech, "Dispatch": disp})
+
+df_dispatch = pd.DataFrame(dispatch_data)
+
+# ------------------------
+# Regional Demand (sum over all snapshots)
+# ------------------------
+demand_dict = {
+    "BRA-N": demand_north.sum(),
+    "BRA-NE": demand_north_east.sum(),
+    "BRA-SE": demand_south_east.sum(),
+    "BRA-S": demand_south.sum()
+}
+demand_series = pd.Series(demand_dict)
+
+# ------------------------
+# Plot
+# ------------------------
+plt.figure(figsize=(10,6))
+
+# Stacked bars for dispatch
+bottoms = pd.Series(0, index=regions)
+for tech in technologies:
+    df_plot = df_dispatch[df_dispatch["Technology"] == tech].set_index("Region")
+    heights = df_plot["Dispatch"].reindex(regions).fillna(0)
+    plt.bar(regions, heights, bottom=bottoms, color=colors_map[tech], label=tech)
+    bottoms += heights
+
+# Overlay demand as a line with markers
+plt.plot(regions, demand_series[regions], color='black', marker='o', linewidth=2, label="Total Demand")
+
+plt.ylabel("Dispatch / Demand (MWh)")
+plt.xlabel("Region")
+plt.title("Regional Electricity Dispatch vs Demand")
+plt.legend(title="Technology / Demand")
+plt.tight_layout()
+plt.show()
 
 # %%
