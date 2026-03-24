@@ -5,6 +5,7 @@ import pandas as pd
 import pypsa
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
     wind_cf_hourly, solar_cf_hourly,)
@@ -34,7 +35,7 @@ network.add("Bus", "bus BRA-NE",
 network.add("Bus", "bus BRA-SE",
             v_nom=400.0,
             carrier="AC",
-            x=-46.6, y=-23.5)
+            x=-46.6, y=-19.5)
 
 network.add("Bus", "bus BRA-S",
             v_nom=400.0,
@@ -230,7 +231,19 @@ network.lines_t.p0 # The active power flow on the lines can now be seen
 
 # %% ###########################3 Plotting of the network ############################
 
-#network.plot(margin=1, bus_sizes=2.0)
+fig, ax = plt.subplots(figsize=(8, 8), subplot_kw={"projection": ccrs.PlateCarree()})
+ax.set_extent([-75, -30, -35, 7], crs=ccrs.PlateCarree())
+ax.add_feature(cfeature.LAND, facecolor="whitesmoke")
+ax.add_feature(cfeature.OCEAN, facecolor="lightcyan")
+ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+ax.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle="--")
+ax.add_feature(cfeature.STATES, linewidth=0.3, edgecolor="gray")
+
+network.plot(ax=ax, bus_sizes=0.1, line_widths=2, margin=0.2,
+             bus_colors="red", line_colors="steelblue",
+             title="Brazilian Power Network")
+plt.tight_layout()
+plt.show()
 
 # %%
 #%% Calculation of imbalance in the grid at the first timestep
