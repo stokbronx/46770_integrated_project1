@@ -203,8 +203,12 @@ gen_labels = {'hydro': 'Hydro', 'nuclear': 'Nuclear', 'biomass': 'Biomass',
 summer_slice = slice('2024-01-07', '2024-01-13')
 winter_slice = slice('2024-07-01', '2024-07-07')
 
-dispatch_filenames = {'Summer (Jan 7–13)': 'figures/dispatch_summer.png',
-                      'Winter (Jul 1–7)': 'figures/dispatch_winter.png'}
+fig_dir = Path(__file__).resolve().parent / "figures"
+fig_dir.mkdir(exist_ok=True)
+dispatch_filenames = {
+    'Summer (Jan 7–13)': str(fig_dir / "dispatch_summer.png"),
+    'Winter (Jul 1–7)': str(fig_dir / "dispatch_winter.png"),
+}
 
 for period_name, sl in [('Summer (Jan 7–13)', summer_slice), ('Winter (Jul 1–7)', winter_slice)]:
     fig, ax = plt.subplots(figsize=(14, 5))
@@ -247,7 +251,7 @@ plt.pie(sizes,
 plt.axis('equal')
 
 plt.title('Electricity mix', y=1.07)
-plt.savefig('figures/electicity_mix.png', dpi=300, bbox_inches='tight')
+plt.savefig(str(fig_dir / "electicity_mix.png"), dpi=300, bbox_inches='tight')
 
 #%% Duration curves
 import numpy as np
@@ -268,7 +272,7 @@ ax.set_ylabel('Power [MW]')
 ax.set_title('Duration Curves')
 ax.legend(loc='upper right', fancybox=True, shadow=True)
 plt.tight_layout()
-fig.savefig('figures/duration_curve.png', dpi=300, bbox_inches='tight')
+fig.savefig(str(fig_dir / "duration_curve.png"), dpi=300, bbox_inches='tight')
 plt.show()
 
 # %% 
@@ -625,6 +629,20 @@ for ax, mix, ttl in [
     )
     ax.axis("equal")
     ax.set_title(ttl)
+
+# Add storage sizing summary directly on the combined mix figure
+battery_p_opt = float(n_st.storage_units.p_nom_opt.get("battery", 0.0)) if not n_st.storage_units.empty else 0.0
+battery_e_opt = battery_p_opt * battery_max_hours
+h2_e_opt = float(n_st.stores.e_nom_opt.get("H2 storage", 0.0)) if not n_st.stores.empty else 0.0
+fig.text(
+    0.02,
+    0.01,
+    (
+        f"Optimized storage sizes:  Battery = {battery_p_opt:,.0f} MW ({battery_e_opt:,.0f} MWh @ {battery_max_hours:.0f}h),  "
+        f"H2 storage = {h2_e_opt:,.0f} MWh"
+    ),
+    fontsize=9,
+)
 plt.suptitle("Part (C): impact on annual electricity mix (generators)", y=1.02)
 plt.tight_layout()
 _savefig_close_partc(fig, "figures/partC_mix_baseline_vs_storage.png")
@@ -644,6 +662,10 @@ print("""
 • One-year horizon: true seasonal storage is only partially visible in 1 year; state how
   H2 still provides longer buffering than the 4 h battery if e_nom_opt is large.
 """)
+print(
+    f"Optimized storage sizes -> Battery: {battery_p_opt:,.0f} MW ({battery_e_opt:,.0f} MWh), "
+    f"H2 storage: {h2_e_opt:,.0f} MWh"
+)
 print(
     "Figures saved (part C, one file per plot):\n"
     "  figures/partC_summer_gen_demand.png, partC_summer_battery_power.png, partC_summer_battery_soc.png,\n"
