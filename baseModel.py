@@ -162,6 +162,7 @@ n.optimize(solver_name="gurobi")
 print(n.objective/1000000) #in 10^6 $
 
 print(f'Cost of electricity: {n.objective/n.loads_t.p_set.sum().sum():.2f} $/MWh')
+print(f'Alternative way to find cost of electricity: {n.statistics.prices()}')
 
 n.generators.p_nom_opt # in MW
 
@@ -176,61 +177,82 @@ gen_colors = {'hydro': 'royalblue', 'nuclear': 'mediumorchid', 'biomass': 'fores
 gen_labels = {'hydro': 'Hydro', 'nuclear': 'Nuclear', 'biomass': 'Biomass',
               'solar': 'Solar', 'onshorewind': 'Onshore Wind'}
 
+#%% LaTeX table: optimal capacities and annual generation
+
+cap = n.generators.p_nom_opt[generators]
+gen = n.generators_t.p[generators].sum()
+total_cap = cap.sum()
+total_gen = gen.sum()
+
+lines = []
+lines.append(r"\begin{table}[htbp]")
+lines.append(r"  \centering")
+lines.append(r"  \caption{Optimal installed capacity and annual generation — SE base model.}")
+lines.append(r"  \label{tab:base_model_results}")
+lines.append(r"  \begin{tabular}{l r r r r}")
+lines.append(r"    \toprule")
+lines.append(r"    Technology & Capacity [MW] & Share [\%] & Generation [TWh] & Share [\%] \\")
+lines.append(r"    \midrule")
+for g in generators:
+    c = cap[g]
+    c_pct = 100 * c / total_cap if total_cap > 0 else 0
+    e = gen[g] / 1e6
+    e_pct = 100 * gen[g] / total_gen if total_gen > 0 else 0
+    lines.append(f"    {gen_labels[g]} & {c:,.0f} & {c_pct:.1f} & {e:,.2f} & {e_pct:.1f} \\\\")
+lines.append(r"    \midrule")
+lines.append(f"    Total & {total_cap:,.0f} & 100.0 & {total_gen/1e6:,.2f} & 100.0 \\\\")
+lines.append(r"    \bottomrule")
+lines.append(r"  \end{tabular}")
+lines.append(r"\end{table}")
+
+latex_table = "\n".join(lines)
+print(latex_table)
+
 # Summer week (Jan in southern hemisphere) and winter week (Jul)
-summer_slice = slice('2024-01-07', '2024-01-13')
+summer_slice = slice('2024-01-08', '2024-01-14')
 winter_slice = slice('2024-07-01', '2024-07-07')
 
-dispatch_filenames = {'Summer (Jan 7–13)': 'figures/dispatch_summer.png',
+dispatch_filenames = {'Summer (Jan 8–14)': 'figures/dispatch_summer.png',
                       'Winter (Jul 1–7)': 'figures/dispatch_winter.png'}
 
-for period_name, sl in [('Summer (Jan 7–13)', summer_slice), ('Winter (Jul 1–7)', winter_slice)]:
-    fig, ax = plt.subplots(figsize=(14, 5))
+for period_name, sl in [('Summer (Jan 8–14)', summer_slice), ('Winter (Jul 1–7)', winter_slice)]:
+    fig, ax = plt.subplots(figsize=(22, 5))
     dispatch = n.generators_t.p.loc[sl, generators]
     active = [g for g in generators if dispatch[g].sum() > 0]
     ax.stackplot(dispatch.index, dispatch[active].values.T,
                  labels=[gen_labels[g] for g in active],
                  colors=[gen_colors[g] for g in active], alpha=0.85)
     ax.plot(n.loads_t.p_set.loc[sl, 'load'], color='black', linewidth=1.5, label='Demand')
-    ax.set_ylabel('Power [MW]')
-    ax.set_xlabel('Time')
-    ax.set_title(f'Dispatch – {period_name}')
-    ax.legend(loc='upper right', fancybox=True, shadow=True)
+    ax.set_ylim(bottom=25000)
+    ax.set_ylabel('Power [MW]', fontsize=20)
+    # ax.set_xlabel('Time', fontsize=20)
+    ax.tick_params(axis='both', labelsize=20)
+    ax.legend(loc='lower right', fontsize=14, fancybox=True, shadow=True)
     fig.autofmt_xdate()
     plt.tight_layout()
     fig.savefig(dispatch_filenames[period_name], dpi=300, bbox_inches='tight')
     plt.show()
 
-pie_data = {
-    'onshore wind': n.generators_t.p['onshorewind'].sum(),
-    'solar':        n.generators_t.p['solar'].sum(),
-    'biomass':      n.generators_t.p['biomass'].sum(),
-    'nuclear':      n.generators_t.p['nuclear'].sum(),
-    'hydro':        n.generators_t.p['hydro'].sum(),
-}
-pie_colors_map = {
-    'onshore wind': 'blue', 'solar': 'orange', 'biomass': 'brown',
-    'nuclear': 'green', 'hydro': 'red',
-}
+pie_data = {g: n.generators_t.p[g].sum() for g in generators}
+active_pie = [g for g in generators if pie_data[g] > 0]
+pie_sizes  = [pie_data[g] for g in active_pie]
+pie_cols   = [gen_colors[g] for g in active_pie]
+pie_labels = [gen_labels[g] for g in active_pie]
 
-labels = [k for k, v in pie_data.items() if v > 0]
-sizes  = [v for v in pie_data.values() if v > 0]
-colors = [pie_colors_map[k] for k in labels]
-
-plt.pie(sizes,
-        colors=colors,
-        labels=labels,
+plt.pie(pie_sizes,
+        colors=pie_cols,
+        labels=pie_labels,
+        autopct='%1.1f%%',
         wedgeprops={'linewidth':0})
 plt.axis('equal')
-
-plt.title('Electricity mix', y=1.07)
 plt.savefig('figures/electicity_mix.png', dpi=300, bbox_inches='tight')
 
 #%% Duration curves
 import numpy as np
 
-fig, ax = plt.subplots(figsize=(14, 5))
+fig, ax = plt.subplots(figsize=(22, 5))
 
-for gen in generators:
+for gen in [g for g in generators if g != 'onshorewind']:
     sorted_dispatch = np.sort(n.generators_t.p[gen].values)[::-1]
     hours = np.arange(1, len(sorted_dispatch) + 1)
     ax.plot(hours, sorted_dispatch, color=gen_colors[gen], label=gen_labels[gen], linewidth=1.5)
@@ -239,10 +261,11 @@ demand_sorted = np.sort(n.loads_t.p_set['load'].values)[::-1]
 ax.plot(np.arange(1, len(demand_sorted) + 1), demand_sorted,
         color='black', linewidth=1.5, linestyle='--', label='Demand')
 
-ax.set_xlabel('Hours')
-ax.set_ylabel('Power [MW]')
-ax.set_title('Duration Curves')
-ax.legend(loc='upper right', fancybox=True, shadow=True)
+ax.set_xlabel('Hours', fontsize=20)
+ax.set_ylabel('Power [MW]', fontsize=20)
+# ax.set_title('Duration Curves')
+ax.legend(loc='lower right', fontsize=20, fancybox=True, shadow=True)
+ax.tick_params(axis='both', labelsize=20)
 plt.tight_layout()
 fig.savefig('figures/duration_curve.png', dpi=300, bbox_inches='tight')
 plt.show()
