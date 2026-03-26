@@ -7,13 +7,9 @@ from pathlib import Path
 _DATA_DIR = Path(__file__).resolve().parent / "Data"
 
 #%% DEMAND DATA
-<<<<<<< HEAD
-df_demand = pd.read_csv(_DATA_DIR / "demand_processed.csv", index_col=0, parse_dates=True)
-=======
 year_to_use = 2024
->>>>>>> origin/main
 
-df_demand_raw = pd.read_csv("Data/demand_brazil.csv", parse_dates=["din_instante"])
+df_demand_raw = pd.read_csv(_DATA_DIR / "demand_brazil.csv", parse_dates=["din_instante"])
 df_demand_raw = df_demand_raw.rename(columns={
     "id_subsistema": "region",
     "din_instante": "datetime",
@@ -31,15 +27,10 @@ demand_north_east = df_demand.loc[df_demand["region"] == "NE", "demand_MW"]
 demand_south_east = df_demand.loc[df_demand["region"] == "SE", "demand_MW"]
 
 
-<<<<<<< HEAD
-#%% WIND CAPACITY FACTOR PROFILES
-wind_cf_hourly = pd.read_csv(_DATA_DIR / "wind_cf_hourly.csv", index_col=0, parse_dates=True)
-=======
 #%% WIND CAPACITY FACTOR PROFILES — derived from power curve + wind speed data
 # Power curve for a ~3.3 MW turbine (read from manufacturer data sheet).
 # Wind speed data from Renewables Ninja is at 2 m height; extrapolated to hub
 # height using the power-law wind profile: v(h) = v(h_ref) * (h / h_ref)^α
->>>>>>> origin/main
 
 wind_state_to_region = {
     "BR.RJ": "SE",
@@ -60,7 +51,7 @@ REF_HEIGHT = 2      # m  (MERRA-2 wind speed measurement height)
 ALPHA      = 1/7    # Hellman exponent (neutral stability, open terrain)
 
 df_wind = pd.read_csv(
-    "Data/renewablesNinjaData/ninja-weather-country-BR-wind_speed_area_wtd-merra2.csv",
+    _DATA_DIR / "renewablesNinjaData/ninja-weather-country-BR-wind_speed_area_wtd-merra2.csv",
     skiprows=3,
     index_col="time",
     parse_dates=True,
@@ -85,14 +76,6 @@ print("Wind hub yearly averages:")
 print(df_wind_year.mean())
 
 
-<<<<<<< HEAD
-#%% SOLAR CAPACITY FACTOR PROFILES
-# SE = RJ (Rio de Janeiro)  PS_002
-# S  = SP (Sao Paulo)       PS_001
-# NE = GO (Goias)           PS_005  (no full-year BA data available)
-# N  = MG (Minas Gerais)    PS_006  (no full-year N data available)
-solar_cf_hourly = pd.read_csv(_DATA_DIR / "solar_cf_hourly.csv", index_col=0, parse_dates=True)
-=======
 #%% SOLAR CAPACITY FACTOR PROFILES — simplified irradiance-only model
 # Assumes constant cell temperature = 25°C (STC reference), so temperature
 # correction vanishes:  CF = G / G_ref, where G_ref = 1000 W/m².
@@ -102,7 +85,6 @@ solar_cf_hourly = pd.read_csv(_DATA_DIR / "solar_cf_hourly.csv", index_col=0, pa
 #   S  = SP (Sao Paulo)
 #   NE = GO (Goias)
 #   N  = MG (Minas Gerais)
->>>>>>> origin/main
 
 G_REF = 1000  # W/m² (Standard Test Conditions reference irradiance)
 
@@ -114,7 +96,7 @@ irradiance_state_to_region = {
 }
 
 df_irr = pd.read_csv(
-    "Data/renewablesNinjaData/ninja-weather-country-BR-irradiance_surface_area_wtd-merra2.csv",
+    _DATA_DIR / "renewablesNinjaData/ninja-weather-country-BR-irradiance_surface_area_wtd-merra2.csv",
     skiprows=3,
     index_col="time",
     parse_dates=True,
