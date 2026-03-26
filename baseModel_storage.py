@@ -603,7 +603,7 @@ for mix, ttl, out in [
         wedgeprops={"linewidth": 0},
     )
     ax.axis("equal")
-    ax.set_title(ttl)
+    #ax.set_title(ttl)
     plt.tight_layout()
     _savefig_close_partc(fig, out)
 
@@ -652,3 +652,5 @@ print(
     "  figures/partC_mix_baseline.png, figures/partC_mix_with_storage.png"
 )
 print("=" * 72)
+
+# %%
