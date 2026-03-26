@@ -52,18 +52,6 @@ network.add("Line"," line SE-N", bus0 = "bus BRA-SE", bus1= "bus BRA-N", x=0.1, 
 # x is the reactance, r is the resistance(In actuality equal to zero), s_nom is the nominal apparent power in VA
 
 # %% Adding the generators to the network
-"""power_plants = { 
-    "BRA": {"hydro": 110000, "biomass": 46500, "nuclear": 2000, "wind": 29500, "solar": 48500},
-} #####These capacities needs to be changed when the optimal values are found############
-
-share = { #####These shares needs to be changed when the optimal values are found############
-    "BRA-N": {"hydro": 0.1, "biomass": 0.2, "nuclear": 0.3, "wind": 0.4, "solar": 0.5},
-    "BRA-S": {"hydro": 0.6, "biomass": 0.7, "nuclear": 0.8, "wind": 0.9, "solar": 1.0},
-    "BRA-NE": {"hydro": 0.1, "biomass": 0.2, "nuclear": 0.3, "wind": 0.4, "solar": 0.5},
-    "BRA-SE": {"hydro": 0.9, "biomass": 0.7, "nuclear": 0.8, "wind": 0.9, "solar": 1.0},
-}
-# Total Brazilian capacities
-"""
 # lifetime of the technologies
 tech_lifetime = {
     "hydro": 65,
@@ -84,11 +72,6 @@ capital_cost = dict(
     wind=2100000, # $/MW (onshore)
     solar=1250000, # $/MW
 )
-
-# Storage (part C) parameters (used when/if we add battery model)
-# Assumption from report: battery capex = 450 $/kW for battery power.
-battery_capex_per_kW = 450  # $/kW
-battery_capex_per_MW = battery_capex_per_kW * 1000  # $/MW
 
 #JOINT CAPACITY AND DISPATCH OPTIMIZATION (NOMINAL CAPACITY IS A DECISION VARIABLE, NOT FIXED)
 
@@ -121,8 +104,6 @@ solar_cf_hourly.index = pd.to_datetime(solar_cf_hourly.index).tz_localize(None)
 
 # Set network snapshots
 network.snapshots = wind_cf_hourly.index
-# Set snapshots
-network.snapshots = wind_cf_hourly.index
 region_cf_map = {
     "BRA-N": "N",
     "BRA-S": "S",
@@ -138,6 +119,7 @@ hydro_cap = { # Introduction a max capacity on hydro power
     "BRA-S": 40000
 }
 network.snapshots = pd.to_datetime(wind_cf_hourly.index).tz_localize(None)
+# Adding the generators to the network so that each bus has every type of generator
 for region in regions:
     for tech in technologies:
 
@@ -163,7 +145,7 @@ for region in regions:
             bus=f"bus {region}",
             carrier=tech,
             p_nom=0,
-            p_nom_extendable=True,
+            p_nom_extendable=True, # Allow the optimization to choose the optimal capacity
             p_nom_max=p_nom_max,
             capital_cost=cap_cost,
             marginal_cost=marg_cost,
@@ -178,8 +160,6 @@ demand = {
     "BRA-SE": demand_south_east,
 }
 
-
-#%% ADD LOADS TO NETWORK
 for region, demand_ts in demand.items():
     demand_ts = demand_ts.reindex(network.snapshots).fillna(0)
 
@@ -194,10 +174,6 @@ for region, demand_ts in demand.items():
         p_set=demand_ts,
         overwrite=True
     )
-
-#%%
-print("Demand timestamps:", demand_north.index[:10])
-print("Snapshot timestamps:", network.snapshots[:10])
 
 # %%
 def fix_string_columns(df):
@@ -221,25 +197,20 @@ for table in [
 # %%
 network.optimize(solver_name="gurobi")
 
-# %%
 print("Objective value:", network.objective)
 print("Total system cost:", network.statistics.system_cost())
 print("Total capex:", network.statistics.capex())
 print("Total opex:", network.statistics.opex())
-
 network.statistics.prices()
 
-#%%
-network.objective/network.loads_t.p_set.sum().sum()
 # %%
 network.generators.p_nom_opt # Optimal capacities of the generators
 # %%
 network.generators_t.p # Optimal dispatch of the generators over time
 #%% 
-network.lines_t.p0.mean() # The active power flow on the lines can now be seen
+network.lines_t.p0.mean() # The average active power flow on the lines can now be seen
 
 # %% ###########################3 Plotting of the network ############################
-
 
 bus_labels = {
     "bus BRA-N": "N",
@@ -336,8 +307,7 @@ for line_name in network.lines.index:
 plt.tight_layout()
 plt.show()
 
-# %%
-#%% Calculation of imbalance in the grid at the first timestep
+#%%######## Calculation of imbalance in the grid at the first timestep####################################
 t0 = network.snapshots[0]
 
 gen_bus = network.generators_t.p.loc[t0].groupby(network.generators.bus).sum()
@@ -349,125 +319,7 @@ print("Nodal imbalance at first timestep (MW):")
 print(imbalance)
 network.lines_t.p0.loc[t0]
 
-
-#%% Plotting two pies with identical size
-
-#%% Plotting two pies side by side with swapped order
-
-technologies = ["wind", "solar", "biomass", "nuclear", "hydro"]
-
-# Colors
-pie_colors_map = {
-    'wind': 'dodgerblue',
-    'solar': 'gold',
-    'biomass': 'green',
-    'nuclear': 'purple',
-    'hydro': 'royalblue'
-}
-
-# Create figure with 1 row, 2 columns
-fig, axes = plt.subplots(1, 2, figsize=(14,7))
-
-# -------------------
-# Pie 1: Installed Capacity (now on the left)
-# -------------------
-pie_data_capacity = {}
-for tech in technologies:
-    gens = network.generators.index[network.generators.carrier == tech]
-    pie_data_capacity[tech] = network.generators.p_nom_opt[gens].sum()
-
-labels = [k for k, v in pie_data_capacity.items() if v > 0]
-sizes  = [v for v in pie_data_capacity.values() if v > 0]
-colors = [pie_colors_map[k] for k in labels]
-
-axes[0].pie(
-    sizes,
-    radius=1,               # fixed radius
-    colors=colors,
-    labels=labels,
-    autopct="%1.1f%%",
-    wedgeprops={'linewidth':0}
-)
-axes[0].set_aspect('equal')
-axes[0].set_title("Installed Capacity Mix")
-
-# -------------------
-# Pie 2: Dispatch (now on the right)
-# -------------------
-pie_data_dispatch = {}
-for tech in technologies:
-    gens = network.generators.index[network.generators.carrier == tech]
-    pie_data_dispatch[tech] = network.generators_t.p[gens].sum().sum()
-
-labels = [k for k, v in pie_data_dispatch.items() if v > 0]
-sizes  = [v for v in pie_data_dispatch.values() if v > 0]
-colors = [pie_colors_map[k] for k in labels]
-
-axes[1].pie(
-    sizes,
-    radius=1,               # fixed radius
-    colors=colors,
-    labels=labels,
-    autopct="%1.1f%%",
-    wedgeprops={'linewidth':0}
-)
-axes[1].set_aspect('equal')
-axes[1].set_title("Electricity Mix (Dispatch)")
-
-plt.tight_layout()
-plt.show()
-# %%
-import matplotlib.pyplot as plt
-import pandas as pd
-
-# List of technologies and regions
-technologies = ["hydro", "biomass", "nuclear", "wind", "solar"]
-regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
-
-# Colors per technology
-colors_map = {
-    'wind': 'dodgerblue',
-    'solar': 'gold',
-    'biomass': 'green',
-    'nuclear': 'purple',
-    'hydro': 'royalblue'
-}
-
-# ------------------------
-# 1️⃣ Histogram: Optimal Capacities
-# ------------------------
-capacity_data = []
-
-for region in regions:
-    for tech in technologies:
-        gens = network.generators.index[
-            (network.generators.carrier == tech) & (network.generators.bus == f"bus {region}")
-        ]
-        if len(gens) > 0:
-            cap = network.generators.p_nom_opt[gens].sum()
-            if cap > 0:  # omit zero capacities
-                capacity_data.append({"Region": region, "Technology": tech, "Capacity": cap})
-
-df_capacity = pd.DataFrame(capacity_data)
-
-plt.figure(figsize=(10,6))
-for tech in technologies:
-    df_plot = df_capacity[df_capacity["Technology"] == tech]
-    plt.bar(df_plot["Region"], df_plot["Capacity"], bottom=df_capacity[df_capacity["Technology"].isin(
-        [t for t in technologies if technologies.index(t) < technologies.index(tech)]
-    )]["Capacity"].groupby(df_capacity["Region"]).sum().reindex(df_plot["Region"]).fillna(0), 
-    color=colors_map[tech], label=tech)
-
-plt.ylabel("Optimal Capacity (MW)")
-plt.xlabel("Region")
-plt.title("Optimal Installed Capacity per Region")
-plt.legend(title="Technology")
-plt.tight_layout()
-plt.show()
-
-
-
-# %%
+# %% ################################ Visualization of regional dispatch vs demand ###############################
 technologies = ["hydro", "biomass", "nuclear", "wind", "solar"]
 regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
 
@@ -572,7 +424,7 @@ plt.legend(handles=legend_elements + [plt.Rectangle((0,0),1,1,color=colors_map[t
 plt.tight_layout()
 plt.show()
 
-# %%
+# %% ############################# Calculation of supply shares in BRA-SE #############################
 technologies = ["hydro", "biomass", "nuclear", "wind", "solar"]
 region = "BRA-SE"
 bus = f"bus {region}"
@@ -634,7 +486,7 @@ for tech in technologies:
 # Imports (dispatch only)
 import_share = 100 * dispatch_dict["imports"] / total_dispatch
 print(f"Imports   | Capacity:   ---  | Dispatch: {import_share:6.2f}%")
-# %% 
+#%%############################ LCOE calculation at each bus ######################################
 regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
 
 lcoe_results = {}
