@@ -320,6 +320,7 @@ print(imbalance)
 network.lines_t.p0.loc[t0]
 
 # %% ################################ Visualization of regional dispatch vs demand ###############################
+
 technologies = ["hydro", "biomass", "nuclear", "wind", "solar"]
 regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
 
@@ -333,7 +334,7 @@ colors_map = {
 }
 
 # ------------------------
-# Dispatch Data (sum over all time steps)
+# Dispatch Data (sum over all time steps in GWh)
 # ------------------------
 dispatch_data = []
 for region in regions:
@@ -342,21 +343,20 @@ for region in regions:
             (network.generators.carrier == tech) & (network.generators.bus == f"bus {region}")
         ]
         if len(gens) > 0:
-            # sum dispatch over all snapshots
-            disp = network.generators_t.p[gens].sum().sum()
-            if disp > 0:  # omit zero dispatch
+            disp = network.generators_t.p[gens].sum().sum() / 1000000  # MWh → TWh
+            if disp > 0:
                 dispatch_data.append({"Region": region, "Technology": tech, "Dispatch": disp})
 
 df_dispatch = pd.DataFrame(dispatch_data)
 
 # ------------------------
-# Regional Demand (sum over all snapshots)
+# Regional Demand (sum over all snapshots in TWh)
 # ------------------------
 demand_dict = {
-    "BRA-N": demand_north.sum(),
-    "BRA-NE": demand_north_east.sum(),
-    "BRA-SE": demand_south_east.sum(),
-    "BRA-S": demand_south.sum()
+    "BRA-N": demand_north.sum() / 1000000,
+    "BRA-NE": demand_north_east.sum() / 1000000,
+    "BRA-SE": demand_south_east.sum() / 1000000,
+    "BRA-S": demand_south.sum() / 1000000
 }
 demand_series = pd.Series(demand_dict)
 
@@ -364,22 +364,64 @@ demand_series = pd.Series(demand_dict)
 # Plot
 # ------------------------
 plt.figure(figsize=(10,6))
+bar_width = 0.6
+bar_positions = np.arange(len(regions))
 
 # Stacked bars for dispatch
-bottoms = pd.Series(0, index=regions)
+bottoms = np.zeros(len(regions))
 for tech in technologies:
     df_plot = df_dispatch[df_dispatch["Technology"] == tech].set_index("Region")
-    heights = df_plot["Dispatch"].reindex(regions).fillna(0)
-    plt.bar(regions, heights, bottom=bottoms, color=colors_map[tech], label=tech)
+    heights = df_plot["Dispatch"].reindex(regions).fillna(0).values
+    plt.bar(bar_positions, heights, bottom=bottoms, width=bar_width,
+            color=colors_map[tech], label=tech, edgecolor='none')
     bottoms += heights
 
-# Overlay demand as a line with markers
-plt.plot(regions, demand_series[regions], color='black', marker='o', linewidth=2, label="Total Demand")
+# Overlay dashed black edges around each bar
+for i, region in enumerate(regions):
+    gen = bottoms[i]
+    x_left = i - bar_width/2
+    x_right = i + bar_width/2
+    y_bottom = 0
+    y_top = gen
+    # Draw dashed rectangle edges
+    plt.plot([x_left, x_right], [y_bottom, y_bottom], color='black', linestyle='dashed', linewidth=1.5)  # bottom
+    plt.plot([x_left, x_right], [y_top, y_top], color='black', linestyle='dashed', linewidth=1.5)        # top
+    plt.plot([x_left, x_left], [y_bottom, y_top], color='black', linestyle='dashed', linewidth=1.5)      # left
+    plt.plot([x_right, x_right], [y_bottom, y_top], color='black', linestyle='dashed', linewidth=1.5)    # right
 
-plt.ylabel("Dispatch / Demand (MWh)")
+# Overlay solid black line for demand and ΔE text
+for i, region in enumerate(regions):
+    demand = demand_series[region]
+    gen = bottoms[i]
+    diff = gen - demand
+    # Solid demand line
+    plt.hlines(y=demand, xmin=i - bar_width/2, xmax=i + bar_width/2,
+               colors='black', linestyles='solid', linewidth=2)
+
+    # ΔE label
+    if region != "BRA-SE":
+        text_y = gen + 0.02*max(bottoms)
+        va_align = 'bottom'
+    else:
+        text_y = gen - 0.5*(gen - demand)
+        va_align = 'center'
+    plt.text(i, text_y, f"$\\Delta E={diff:.1f}$ TWh", va=va_align, ha='center', fontsize=10, color='black')
+
+# Add a legend for the dashed edges representing generation and solid line representing demand
+# We can use proxy lines for legend
+from matplotlib.lines import Line2D
+
+legend_elements = [
+    Line2D([0], [0], color='black', lw=2, linestyle='solid', label='Demand'),
+    Line2D([0], [0], color='black', lw=1.5, linestyle='dashed', label='Generation')
+]
+
+plt.ylabel("Dispatch / Demand (TWh)")
 plt.xlabel("Region")
 plt.title("Regional Electricity Dispatch vs Demand")
-plt.legend(title="Technology / Demand")
+plt.xticks(bar_positions, regions)
+plt.legend(handles=legend_elements + [plt.Rectangle((0,0),1,1,color=colors_map[tech]) for tech in technologies],
+           labels=['Demand', 'Generation'] + technologies, title="Legend", bbox_to_anchor=(1.05,1))
 plt.tight_layout()
 plt.show()
 
@@ -482,4 +524,3 @@ for region in regions:
 print("\nLCOE at each bus ($/MWh):")
 for region, value in lcoe_results.items():
     print(f"{region}: {value:.2f} $/MWh")
-# %%
