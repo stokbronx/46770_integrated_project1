@@ -85,6 +85,11 @@ capital_cost = dict(
     solar=1250000, # $/MW
 )
 
+# Storage (part C) parameters (used when/if we add battery model)
+# Assumption from report: battery capex = 450 $/kW for battery power.
+battery_capex_per_kW = 450  # $/kW
+battery_capex_per_MW = battery_capex_per_kW * 1000  # $/MW
+
 #JOINT CAPACITY AND DISPATCH OPTIMIZATION (NOMINAL CAPACITY IS A DECISION VARIABLE, NOT FIXED)
 
 #MARGINAL COSTS (Needs to be updated with data from litterature)

@@ -1,12 +1,15 @@
 #%% IMPORT PACKAGES
 import pandas as pd
 import numpy as np
+from pathlib import Path
 
+# Data folder next to this script (works when run from any working directory)
+_DATA_DIR = Path(__file__).resolve().parent / "Data"
 
 #%% DEMAND DATA
 year_to_use = 2024
 
-df_demand_raw = pd.read_csv("Data/demand_brazil.csv", parse_dates=["din_instante"])
+df_demand_raw = pd.read_csv(_DATA_DIR / "demand_brazil.csv", parse_dates=["din_instante"])
 df_demand_raw = df_demand_raw.rename(columns={
     "id_subsistema": "region",
     "din_instante": "datetime",
@@ -48,7 +51,7 @@ REF_HEIGHT = 2      # m  (MERRA-2 wind speed measurement height)
 ALPHA      = 1/7    # Hellman exponent (neutral stability, open terrain)
 
 df_wind = pd.read_csv(
-    "Data/renewablesNinjaData/ninja-weather-country-BR-wind_speed_area_wtd-merra2.csv",
+    _DATA_DIR / "renewablesNinjaData/ninja-weather-country-BR-wind_speed_area_wtd-merra2.csv",
     skiprows=3,
     index_col="time",
     parse_dates=True,
@@ -93,7 +96,7 @@ irradiance_state_to_region = {
 }
 
 df_irr = pd.read_csv(
-    "Data/renewablesNinjaData/ninja-weather-country-BR-irradiance_surface_area_wtd-merra2.csv",
+    _DATA_DIR / "renewablesNinjaData/ninja-weather-country-BR-irradiance_surface_area_wtd-merra2.csv",
     skiprows=3,
     index_col="time",
     parse_dates=True,
