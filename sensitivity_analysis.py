@@ -39,36 +39,75 @@ for yr in YEARS:
         wind_monthly_all[reg][yr]  = wind_cf_yr[reg].groupby(wind_cf_yr.index.month).mean()
 
 
-#%% Plot: monthly mean CF ± 1 std over 20 years
+#%% Plot: monthly mean CF ± 1 std over 20 years — SE only
 
-fig, axes = plt.subplots(2, 4, figsize=(18, 8), sharey='row')
+fig, axes = plt.subplots(2, 1, figsize=(6, 4.5))
 
-for i, reg in enumerate(REGIONS):
-    ax_s = axes[0, i]
-    s_mean = solar_monthly_all[reg].mean(axis=1)
-    s_std  = solar_monthly_all[reg].std(axis=1)
-    ax_s.plot(range(1, 13), s_mean, 'o-', color='goldenrod', lw=2)
-    ax_s.fill_between(range(1, 13), s_mean - s_std, s_mean + s_std,
-                      color='gold', alpha=0.35)
-    ax_s.set_xticks(range(1, 13))
-    ax_s.set_xticklabels(MONTH_NAMES, rotation=45, fontsize=8)
-    ax_s.set_title(f'Solar — {reg}')
-    if i == 0:
-        ax_s.set_ylabel('Capacity Factor')
+s_mean = solar_monthly_all["SE"].mean(axis=1)
+s_std  = solar_monthly_all["SE"].std(axis=1)
+axes[0].plot(range(1, 13), s_mean, 'o-', color='goldenrod', lw=2)
+axes[0].fill_between(range(1, 13), s_mean - s_std, s_mean + s_std,
+                     color='gold', alpha=0.35)
+axes[0].set_xticks(range(1, 13))
+axes[0].set_xticklabels(MONTH_NAMES, rotation=45, fontsize=8)
+axes[0].set_title('Solar — SE')
+axes[0].set_ylabel('Capacity Factor')
 
-    ax_w = axes[1, i]
-    w_mean = wind_monthly_all[reg].mean(axis=1)
-    w_std  = wind_monthly_all[reg].std(axis=1)
-    ax_w.plot(range(1, 13), w_mean, 's-', color='steelblue', lw=2)
-    ax_w.fill_between(range(1, 13), w_mean - w_std, w_mean + w_std,
-                      color='lightskyblue', alpha=0.45)
-    ax_w.set_xticks(range(1, 13))
-    ax_w.set_xticklabels(MONTH_NAMES, rotation=45, fontsize=8)
-    ax_w.set_title(f'Wind — {reg}')
-    if i == 0:
-        ax_w.set_ylabel('Capacity Factor')
+w_mean = wind_monthly_all["SE"].mean(axis=1)
+w_std  = wind_monthly_all["SE"].std(axis=1)
+axes[1].plot(range(1, 13), w_mean, 's-', color='steelblue', lw=2)
+axes[1].fill_between(range(1, 13), w_mean - w_std, w_mean + w_std,
+                     color='lightskyblue', alpha=0.45)
+axes[1].set_xticks(range(1, 13))
+axes[1].set_xticklabels(MONTH_NAMES, rotation=45, fontsize=8)
+axes[1].set_title('Wind — SE')
+axes[1].set_ylabel('Capacity Factor')
 
-fig.suptitle('Monthly Capacity Factors — Mean ± 1σ  (2005–2024)', fontsize=14, y=1.01)
+# fig.suptitle('Monthly Capacity Factors (SE) — Mean ± 1σ  (2005–2024)', fontsize=14, y=1.01)
+
+plt.tight_layout()
+fig.savefig('figures/monthly_cf_SE.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+
+#%% Plot: yearly capacity factor variation — SE only
+
+solar_annual_cf = pd.Series(dtype=float, index=YEARS)
+wind_annual_cf  = pd.Series(dtype=float, index=YEARS)
+
+for yr in YEARS:
+    yr_slice = slice(f"{yr}-01-01", f"{yr}-12-31")
+
+    irr_yr = df_irr.loc[yr_slice]
+    solar_annual_cf[yr] = (irr_yr["SE"] / G_REF).clip(upper=1.0).mean()
+
+    wind_yr = df_wind.loc[yr_slice, "SE"]
+    wind_hub = wind_yr * (HUB_HEIGHT / REF_HEIGHT) ** ALPHA
+    wind_annual_cf[yr] = (np.interp(wind_hub, pc_ws, pc_kw) / P_RATED).mean()
+
+fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharey=False)
+
+axes[0].plot(YEARS, solar_annual_cf, 'o-', color='goldenrod', lw=2)
+axes[0].fill_between(YEARS,
+                     solar_annual_cf.mean() - solar_annual_cf.std(),
+                     solar_annual_cf.mean() + solar_annual_cf.std(),
+                     color='gold', alpha=0.35)
+axes[0].set_title('Solar - SE')
+axes[0].set_ylabel('Capacity Factor')
+axes[0].set_xticks(YEARS)
+axes[0].set_xticklabels(YEARS, rotation=45, fontsize=8)
+
+axes[1].plot(YEARS, wind_annual_cf, 's-', color='steelblue', lw=2)
+axes[1].fill_between(YEARS,
+                     wind_annual_cf.mean() - wind_annual_cf.std(),
+                     wind_annual_cf.mean() + wind_annual_cf.std(),
+                     color='lightskyblue', alpha=0.45)
+axes[1].set_title('Wind - SE')
+axes[1].set_ylabel('Capacity Factor')
+axes[1].set_xticks(YEARS)
+axes[1].set_xticklabels(YEARS, rotation=45, fontsize=8)
+
+fig.suptitle('Yearly Capacity Factor Variation — SE (2005–2024)', fontsize=14, y=1.01)
 plt.tight_layout()
 plt.show()
 
