@@ -499,22 +499,69 @@ for tech in technologies:
 import_share = 100 * dispatch_dict["imports"] / total_dispatch
 print(f"Imports   | Capacity:   ---  | Dispatch: {import_share:6.2f}%")
 
-#%%
+# BATTERY CONTRIBUTION (SEPARATE METRICS)
+# ------------------------
+
 battery_units = network.storage_units.index[
     network.storage_units.bus == bus
 ]
 
-p_nom = network.storage_units.p_nom_opt[battery_units].sum()
+# Installed battery power (MW)
+battery_power = network.storage_units.p_nom_opt[battery_units].sum()
 
-# energy capacity = power * hours
-max_hours = network.storage_units.loc[battery_units, "max_hours"].iloc[0]
-e_nom = p_nom * max_hours
+# Energy capacity (MWh)
+battery_energy = (
+    battery_power *
+    network.storage_units.loc[battery_units, "max_hours"].iloc[0]
+)
 
-print(f"\nBattery in {region}")
-print(f"Power capacity (MW): {p_nom:.1f}")
-print(f"Energy capacity (MWh): {e_nom:.1f}")
-print(f"Duration (hours): {e_nom/p_nom}")
+# ------------------------
+# Battery dispatch (IMPORTANT: split charge/discharge)
+# ------------------------
 
+battery_dispatch = network.storage_units_t.p[battery_units]
+
+# Discharging = positive contribution to system supply
+battery_discharge = battery_dispatch.clip(lower=0).sum().sum()
+
+# Total system generation + storage discharge (same denominator style as your model)
+total_system_dispatch = (
+    network.generators_t.p.sum().sum()
+)
+
+# ------------------------
+# PERCENTAGES
+# ------------------------
+
+battery_power_share = (
+    100 * battery_power / (network.generators.p_nom_opt.sum() + battery_power)
+)
+
+battery_dispatch_share = (
+    100 * battery_discharge / (total_system_dispatch + battery_discharge)
+)
+# ------------------------
+# BATTERY CAPACITY SHARE (MW BASIS)
+# ------------------------
+
+# Total generator capacity (MW)
+total_generator_capacity = network.generators.p_nom_opt.sum()
+
+# Battery capacity (MW)
+battery_capacity_mw = battery_power  # already computed earlier
+
+# System total capacity including battery
+total_system_capacity = total_generator_capacity + battery_capacity_mw
+
+# Battery capacity share
+battery_capacity_share = (
+    100 * battery_capacity_mw / total_system_capacity
+    if total_system_capacity > 0 else 0
+)
+
+print(f"\nBattery contribution in {region}\n")
+print(f"Battery capacity share: {battery_capacity_share:.2f}% of total system capacity")
+print(f"Dispatch share:        {battery_dispatch_share:.2f}% of total generation")
 
 #%%############################ LCOE calculation at each bus ######################################
 regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
