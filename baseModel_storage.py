@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 from datapreparation import (
     wind_cf_hourly, solar_cf_hourly, demand_south_east,
 )
+import importlib
+import parameters
+importlib.reload(parameters)
 from parameters import (
     capital_cost, opex_cost, marginal_cost, lifetime,
     max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE,

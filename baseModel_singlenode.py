@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 from datapreparation import (
     wind_cf_hourly, solar_cf_hourly, demand_south_east,
 )
+import importlib
+import parameters
+importlib.reload(parameters)
 from parameters import (
     capital_cost, opex_cost, marginal_cost, lifetime,
     max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE,
@@ -59,6 +62,9 @@ n.add("Load",
 n.add("Carrier", "gas", co2_emissions=0.19) # in t_CO2/MWh_th
 n.add("Carrier", "onshorewind")
 n.add("Carrier", "solar")
+n.add("Carrier", "biomass")
+n.add("Carrier", "nuclear")
+n.add("Carrier", "hydro")
 
 # add onshore wind generator
 CF_wind = wind_cf_hourly[region][[hour.strftime("%Y-%m-%dT%H:%M:%SZ") for hour in n.snapshots]]
@@ -137,6 +143,14 @@ gen_labels = {'hydro': 'Hydro', 'nuclear': 'Nuclear', 'biomass': 'Biomass',
               'solar': 'Solar', 'onshorewind': 'Onshore Wind'}
 
 #%% LaTeX table: optimal capacities and annual generation
+
+print(f'biomass: {annualized_cost("biomass")}')
+print(f'hydro: {annualized_cost("hydro")}')
+print(f'nuclear: {annualized_cost("nuclear")}')
+print(f'solar: {annualized_cost("solar")}')
+print(f'onshorewind: {annualized_cost("wind")}')
+
+
 
 cap = n.generators.p_nom_opt[generators]
 gen = n.generators_t.p[generators].sum()

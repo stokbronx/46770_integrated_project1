@@ -1,6 +1,6 @@
 capital_cost = dict(  # in $/MW
     hydro=3215000,
-    biomass=1300000,
+    biomass=1900000,
     nuclear=7545000,
     wind=1083000,
     solar=877000,

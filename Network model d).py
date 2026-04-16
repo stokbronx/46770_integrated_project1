@@ -9,6 +9,9 @@ import cartopy.feature as cfeature
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
     wind_cf_hourly, solar_cf_hourly,)
+import importlib
+import parameters
+importlib.reload(parameters)
 from parameters import (
     capital_cost, opex_cost, marginal_cost, lifetime,
     max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE,
