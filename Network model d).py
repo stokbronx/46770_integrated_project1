@@ -15,9 +15,9 @@ network = pypsa.Network()
 
 network.add(
     "Carrier",
-    ["hydro", "biomass", "nuclear", "wind", "solar"],
-    nice_name=["Hydro", "Biomass", "Nuclear", "Wind", "Solar"],
-    color=["aquamarine", "sienna", "purple", "dodgerblue", "gold"]
+    ["hydro", "biomass", "nuclear", "wind", "solar", "battery"],
+    nice_name=["Hydro", "Biomass", "Nuclear", "Wind", "Solar", "Battery"],
+    color=["aquamarine", "sienna", "purple", "dodgerblue", "gold", "violet"]
 )
 network.add("Carrier", "AC")
 
@@ -41,18 +41,16 @@ network.add("Bus", "bus BRA-S",
             v_nom=400.0,
             carrier="AC",
             x=-51.2, y=-30.0)
-network.buses
+
 
 # Adding the network lines between the buses
-network.add("Line"," line N-NE", bus0 = "bus BRA-N", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC",s_nom=1100) 
-network.add("Line"," line NE-SE", bus0 = "bus BRA-NE", bus1= "bus BRA-SE", x=0.1, r=0.01, carrier="AC",s_nom=1100)
-network.add("Line"," line SE-S", bus0 = "bus BRA-SE", bus1= "bus BRA-S", x=0.1, r=0.01, carrier="AC",s_nom=1100)
-network.add("Line"," line SE-N", bus0 = "bus BRA-SE", bus1= "bus BRA-N", x=0.1, r=0.01, carrier="AC",s_nom=1100)
-# network.add("Line"," line S-NE", bus0 = "bus BRA-S", bus1= "bus BRA-NE", x=0.1, r=0.01, carrier="AC",s_nom=1100)
-# x is the reactance, r is the resistance(In actuality equal to zero), s_nom is the nominal apparent power in VA
+network.add("Line"," line N-NE", bus0="bus BRA-N", bus1="bus BRA-NE", x=0.1, r=0.01, carrier="AC", s_nom=1100) 
+network.add("Line"," line NE-SE", bus0="bus BRA-NE", bus1="bus BRA-SE", x=0.1, r=0.01, carrier="AC", s_nom=1100)
+network.add("Line"," line SE-S", bus0="bus BRA-SE", bus1="bus BRA-S", x=0.1, r=0.01, carrier="AC", s_nom=1100)
+network.add("Line"," line SE-N", bus0="bus BRA-SE", bus1="bus BRA-N", x=0.1, r=0.01, carrier="AC", s_nom=1100)
 
-# %% Adding the generators to the network
-# lifetime of the technologies
+
+#%% Adding generators
 tech_lifetime = {
     "hydro": 65,
     "biomass": 25,
@@ -60,66 +58,73 @@ tech_lifetime = {
     "wind": 25,
     "solar": 25,
 }
-# Add costs
-#%% MODEL PARAMETERS
 
 capital_cost = dict(
-    hydro=3750000, # $/MW
-    #gas=1000,
-    #coal=1000,
-    biomass=3750000, # $/MW
-    nuclear=7500000, # $/MW
-    wind=2100000, # $/MW (onshore)
-    solar=1250000, # $/MW
+    hydro=3750000,
+    biomass=3750000,
+    nuclear=7500000,
+    wind=2100000,
+    solar=1250000,
 )
 
-#JOINT CAPACITY AND DISPATCH OPTIMIZATION (NOMINAL CAPACITY IS A DECISION VARIABLE, NOT FIXED)
-
-#MARGINAL COSTS (Needs to be updated with data from litterature)
 marginal_cost = dict(
-    hydro=3, # $/MWh
-    #gas=1000,
-    #coal=100,
-    biomass=75, # $/MWh
-    nuclear=12, # $/MWh 
-    wind=0, # $/MWh
-    solar=0, # $/MWh
+    hydro=3,
+    biomass=75,
+    nuclear=12,
+    wind=0,
+    solar=0,
 )
-#%% The annuity function is defined
 
-def annuity(n,r):
-    """ Calculate the annuity factor for an asset with lifetime n years and
-    discount rate  r """
 
+def annuity(n, r):
     if r > 0:
         return r/(1. - 1./(1.+r)**n)
     else:
         return 1/n
 
-#%% Mapping from network region names to CF DataFrame columns
-# Fix timestamps
-# Convert index to datetime
+
+# ============================
+# 🔋 BATTERY PARAMETERS (UPDATED)
+# ============================
+
+battery_lifetime = 15
+
+# CAPEX split (Li-ion typical assumption)
+battery_power_cost = 65_000      # $/MW  (65 $/kW)
+battery_energy_cost = 230_000    # $/MWh (230 $/kWh)
+
+battery_eff_store = 0.95
+battery_eff_dispatch = 0.95
+
+standing_loss = 0.0005  # per hour (tuneable)
+
+# annualised costs
+power_capital_cost = annuity(battery_lifetime, 0.07) * battery_power_cost
+energy_capital_cost = annuity(battery_lifetime, 0.07) * battery_energy_cost
+
+
+#%% Snapshots
 wind_cf_hourly.index = pd.to_datetime(wind_cf_hourly.index).tz_localize(None)
 solar_cf_hourly.index = pd.to_datetime(solar_cf_hourly.index).tz_localize(None)
 
-# Set network snapshots
 network.snapshots = wind_cf_hourly.index
-region_cf_map = {
-    "BRA-N": "N",
-    "BRA-S": "S",
-    "BRA-NE": "NE",
-    "BRA-SE": "SE"
-}
-technologies = ["hydro", "biomass", "nuclear", "wind", "solar"]
-regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
-hydro_cap = { # Introduction a max capacity on hydro power
-    "BRA-N": 40000, # MW
+
+region_cf_map = {"BRA-N":"N","BRA-S":"S","BRA-NE":"NE","BRA-SE":"SE"}
+regions = ["BRA-N","BRA-NE","BRA-SE","BRA-S"]
+technologies = ["hydro","biomass","nuclear","wind","solar"]
+
+hydro_cap = {
+    "BRA-N": 40000,
     "BRA-NE": 40000,
     "BRA-SE": 40000,
     "BRA-S": 40000
 }
-network.snapshots = pd.to_datetime(wind_cf_hourly.index).tz_localize(None)
-# Adding the generators to the network so that each bus has every type of generator
+
+
+# ============================
+# GENERATORS (UNCHANGED)
+# ============================
+
 for region in regions:
     for tech in technologies:
 
@@ -133,11 +138,7 @@ for region in regions:
         else:
             p_max_pu = None
 
-        # Hydro capacity constraint
-        if tech == "hydro":
-            p_nom_max = hydro_cap[region]
-        else:
-            p_nom_max = None
+        p_nom_max = hydro_cap[region] if tech == "hydro" else None
 
         network.add(
             "Generator",
@@ -145,14 +146,48 @@ for region in regions:
             bus=f"bus {region}",
             carrier=tech,
             p_nom=0,
-            p_nom_extendable=True, # Allow the optimization to choose the optimal capacity
+            p_nom_extendable=True,
             p_nom_max=p_nom_max,
             capital_cost=cap_cost,
             marginal_cost=marg_cost,
             p_max_pu=p_max_pu
         )
-# %% Now the loads are added to the network
 
+
+# ============================
+# 🔋 BATTERY (STORE + LINK STYLE via StorageUnit)
+# ============================
+
+for region in regions:
+
+    network.add(
+        "StorageUnit",
+        f"{region} battery",
+        bus=f"bus {region}",
+        carrier="battery",
+
+        p_nom_extendable=True,
+        p_nom=0,
+
+        # energy capacity implicitly = p_nom * max_hours
+        max_hours=4.0,
+
+        efficiency_store=battery_eff_store,
+        efficiency_dispatch=battery_eff_dispatch,
+
+        # standing losses (self-discharge)
+        standing_loss=standing_loss,
+
+        # IMPORTANT: split cost model
+        capital_cost=power_capital_cost + energy_capital_cost,
+
+        marginal_cost=0.0,
+
+        cyclic_state_of_charge=True,
+    )
+
+
+#%% Loads (UNCHANGED)
 demand = {
     "BRA-N": demand_north,
     "BRA-S": demand_south,
@@ -163,10 +198,6 @@ demand = {
 for region, demand_ts in demand.items():
     demand_ts = demand_ts.reindex(network.snapshots).fillna(0)
 
-    print(f"\nDEBUG {region}:")
-    print("  NaNs:", demand_ts.isna().sum())
-    print("  Sum:", demand_ts.sum())
-
     network.add(
         "Load",
         f"load {region}",
@@ -175,28 +206,11 @@ for region, demand_ts in demand.items():
         overwrite=True
     )
 
-# %%
-def fix_string_columns(df):
-    for col in df.columns:
-        if pd.api.types.is_string_dtype(df[col]):
-            df[col] = df[col].astype("object")
 
-# Apply to all relevant PyPSA component tables
-for table in [
-    network.buses,
-    network.lines,
-    network.generators,
-    network.loads,
-    network.carriers,
-    network.links,
-]:
-    fix_string_columns(table)
-
-
-
-# %%
+#%% Solve
 network.optimize(solver_name="gurobi")
 
+#%% Results
 print("Objective value:", network.objective)
 print("Total system cost:", network.statistics.system_cost())
 print("Total capex:", network.statistics.capex())
@@ -207,9 +221,8 @@ network.statistics.prices()
 network.generators.p_nom_opt # Optimal capacities of the generators
 # %%
 network.generators_t.p # Optimal dispatch of the generators over time
-#%% 
-network.lines_t.p0.mean() # The active power flow on the lines can now be seen
-
+#%% # The average active power flow on the lines can now be seen
+(network.lines_t.p0.mean()/1100*100).round(2)
 # %% ###########################3 Plotting of the network ############################
 
 bus_labels = {
@@ -399,12 +412,10 @@ for i, region in enumerate(regions):
                colors='black', linestyles='solid', linewidth=2)
 
     # ΔE label
-    if region != "BRA-SE":
+    if region in regions:
         text_y = gen + 0.02*max(bottoms)
         va_align = 'bottom'
-    else:
-        text_y = gen - 0.5*(gen - demand)
-        va_align = 'center'
+    
     plt.text(i, text_y, f"$\\Delta E={diff:.1f}$ TWh", va=va_align, ha='center', fontsize=10, color='black')
 
 # Add a legend for the dashed edges representing generation and solid line representing demand
@@ -484,9 +495,27 @@ for tech in technologies:
     if cap_share > 0 or disp_share > 0:
         print(f"{tech.capitalize():8s} | Capacity: {cap_share:6.2f}% | Dispatch: {disp_share:6.2f}%")
 
-# Imports (dispatch only)
+
 import_share = 100 * dispatch_dict["imports"] / total_dispatch
 print(f"Imports   | Capacity:   ---  | Dispatch: {import_share:6.2f}%")
+
+#%%
+battery_units = network.storage_units.index[
+    network.storage_units.bus == bus
+]
+
+p_nom = network.storage_units.p_nom_opt[battery_units].sum()
+
+# energy capacity = power * hours
+max_hours = network.storage_units.loc[battery_units, "max_hours"].iloc[0]
+e_nom = p_nom * max_hours
+
+print(f"\nBattery in {region}")
+print(f"Power capacity (MW): {p_nom:.1f}")
+print(f"Energy capacity (MWh): {e_nom:.1f}")
+print(f"Duration (hours): {e_nom/p_nom}")
+
+
 #%%############################ LCOE calculation at each bus ######################################
 regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
 
