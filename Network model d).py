@@ -9,6 +9,10 @@ import cartopy.feature as cfeature
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
     wind_cf_hourly, solar_cf_hourly,)
+from parameters import (
+    capital_cost, opex_cost, marginal_cost, lifetime,
+    max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE,
+)
 
 #%% Adding the buses to the network
 network = pypsa.Network()
@@ -50,37 +54,7 @@ network.add("Line"," line SE-S", bus0="bus BRA-SE", bus1="bus BRA-S", x=0.1, r=0
 network.add("Line"," line SE-N", bus0="bus BRA-SE", bus1="bus BRA-N", x=0.1, r=0.01, carrier="AC", s_nom=1100)
 
 
-#%% Adding generators
-tech_lifetime = {
-    "hydro": 65,
-    "biomass": 25,
-    "nuclear": 50,
-    "wind": 25,
-    "solar": 25,
-}
-
-capital_cost = dict(
-    hydro=3750000,
-    biomass=3750000,
-    nuclear=7500000,
-    wind=2100000,
-    solar=1250000,
-)
-
-marginal_cost = dict(
-    hydro=3,
-    biomass=75,
-    nuclear=12,
-    wind=0,
-    solar=0,
-)
-
-
-def annuity(n, r):
-    if r > 0:
-        return r/(1. - 1./(1.+r)**n)
-    else:
-        return 1/n
+#%% Adding generators (parameters imported from parameters.py)
 
 
 # ============================
@@ -114,10 +88,10 @@ regions = ["BRA-N","BRA-NE","BRA-SE","BRA-S"]
 technologies = ["hydro","biomass","nuclear","wind","solar"]
 
 hydro_cap = {
-    "BRA-N": 40000,
-    "BRA-NE": 40000,
-    "BRA-SE": 40000,
-    "BRA-S": 40000
+    "BRA-N": max_capacity_hydro,
+    "BRA-NE": max_capacity_hydro,
+    "BRA-SE": max_capacity_hydro,
+    "BRA-S": max_capacity_hydro,
 }
 
 
@@ -128,8 +102,7 @@ hydro_cap = {
 for region in regions:
     for tech in technologies:
 
-        lifetime = tech_lifetime[tech]
-        cap_cost = annuity(lifetime, 0.07) * capital_cost[tech] * (1 + 0.033)
+        cap_cost = annualized_cost(tech)
         marg_cost = marginal_cost[tech]
 
         if tech in ["wind", "solar"]:

@@ -7,6 +7,10 @@ import matplotlib.pyplot as plt
 from datapreparation import (
     wind_cf_hourly, solar_cf_hourly, demand_south_east,
 )
+from parameters import (
+    capital_cost, opex_cost, marginal_cost, lifetime,
+    max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE,
+)
 
 region = 'SE'
 
@@ -24,53 +28,7 @@ solar_cf_hourly = solar_cf_hourly.reindex(full_2024_index).interpolate()
 
 demand_SE = demand_south_east.values
 
-#%% MODEL PARAMETERS
-
-capital_cost = dict(
-    hydro=3750000,
-    biomass=3750000,
-    nuclear=7500000,
-    wind=2100000,
-    solar=1250000,
-)
-
-marginal_cost = dict(
-    hydro=5,
-    biomass=75,
-    nuclear=12,
-    wind=0,
-    solar=0,
-)
-
-lifetime = dict(
-    hydro=65,
-    biomass=25,
-    nuclear=50,
-    wind=25,
-    solar=25,
-)
-
-# # Regional shares estimated from the power plant map (each tech sums to 1.0 across regions)
-# share = {
-#     "North":      {"hydro": 0.30, "thermal": 0.10, "nuclear": 0.00, "wind": 0.02, "solar": 0.05},
-#     "South":      {"hydro": 0.20, "thermal": 0.15, "nuclear": 0.00, "wind": 0.08, "solar": 0.05},
-#     "North-East": {"hydro": 0.10, "thermal": 0.30, "nuclear": 0.00, "wind": 0.85, "solar": 0.60},
-#     "South-East": {"hydro": 0.40, "thermal": 0.45, "nuclear": 1.00, "wind": 0.05, "solar": 0.30},
-# }
-
-# bra_capacity = {"hydro": 110000, "thermal": 46500, "nuclear": 2000, "wind": 29500, "solar": 48500}
-
-# power_plants = {"BRA": bra_capacity}
-# for region in share:
-#     power_plants[region] = {tech: bra_capacity[tech] * share[region][tech] for tech in bra_capacity}
-
-#Use demand from datapreparation.py
-# Demand is already loaded from datapreparation.py as `demand_SE`.
-
-
-#%% Max capacities for hydro
-
-max_capacity_hydro = 40000
+#%% MODEL PARAMETERS (imported from parameters.py)
 
 
 
@@ -97,17 +55,6 @@ n.add("Load",
     p_set=demand_SE)
 
 
-# %% Annuity function
-
-def annuity(n,r):
-    """ Calculate the annuity factor for an asset with lifetime n years and
-    discount rate  r """
-
-    if r > 0:
-        return r/(1. - 1./(1.+r)**n)
-    else:
-        return 1/n
-
 #%% Adding electrical technologies and carriers
 # add the different carriers, only gas emits CO2
 n.add("Carrier", "gas", co2_emissions=0.19) # in t_CO2/MWh_th
@@ -116,61 +63,53 @@ n.add("Carrier", "solar")
 
 # add onshore wind generator
 CF_wind = wind_cf_hourly[region][[hour.strftime("%Y-%m-%dT%H:%M:%SZ") for hour in n.snapshots]]
-capital_cost_onshorewind = annuity(lifetime["wind"],0.07)*capital_cost["wind"]*(1+0.033) # in $/MW
 n.add("Generator",
     "onshorewind",
     bus="electricity bus",
     p_nom_extendable=True,
     carrier="onshorewind",
-    capital_cost = capital_cost_onshorewind,
+    capital_cost = annualized_cost("wind"),
     marginal_cost = 0,
     p_max_pu = CF_wind.values)
 
 # add solar PV generator
 CF_solar = solar_cf_hourly[region][[hour.strftime("%Y-%m-%dT%H:%M:%SZ") for hour in n.snapshots]]
 
-capital_cost_solar = annuity(lifetime["solar"],0.07)*capital_cost["solar"]*(1+0.033) # in $/MW
 n.add("Generator",
     "solar",
     bus="electricity bus",
     p_nom_extendable=True,
     carrier="solar",
-    capital_cost = capital_cost_solar,
+    capital_cost = annualized_cost("solar"),
     marginal_cost = 0,
     p_max_pu = CF_solar.values)
 
 # add Biomass generator
-capital_cost_biomass = annuity(lifetime["biomass"],0.07)*capital_cost["biomass"]*(1+0.033) # in $/MW
-marginal_cost_biomass = marginal_cost["biomass"] # in $/MWh_el
 n.add("Generator",
     "biomass",
     bus="electricity bus",
     p_nom_extendable=True,
     carrier="biomass",
-    capital_cost = capital_cost_biomass,
-    marginal_cost = marginal_cost_biomass)
+    capital_cost = annualized_cost("biomass"),
+    marginal_cost = marginal_cost["biomass"])
 
 # add Nuclear generator
-capital_cost_nuclear = annuity(lifetime["nuclear"],0.07)*capital_cost["nuclear"]*(1+0.033) # in $/MW
-marginal_cost_nuclear = marginal_cost["nuclear"] # in $/MWh_el
 n.add("Generator",
     "nuclear",
     bus="electricity bus",
     p_nom_extendable=True,
     carrier="nuclear",
-    capital_cost = capital_cost_nuclear,
-    marginal_cost = marginal_cost_nuclear)
+    capital_cost = annualized_cost("nuclear"),
+    marginal_cost = marginal_cost["nuclear"])
 
 # add hydro generator
-capital_cost_hydro = annuity(lifetime["hydro"],0.07)*capital_cost["hydro"]*(1+0.033) # in $/MW
-marginal_cost_hydro = marginal_cost["hydro"] # in $/MWh_el
 n.add("Generator",
     "hydro",
     bus="electricity bus",
     p_nom_extendable=True,
     carrier="hydro",
-    capital_cost = capital_cost_hydro,
-    marginal_cost = marginal_cost_hydro,
+    capital_cost = annualized_cost("hydro"),
+    marginal_cost = marginal_cost["hydro"],
     p_nom_max=max_capacity_hydro)
 
 n.generators_t.p_max_pu
@@ -290,7 +229,6 @@ battery_capex_per_kW = 450  # $/kW
 battery_capex_per_MW = battery_capex_per_kW * 1000  # $/MW
 
 # --- Economic / technical assumptions (aligned with report + course examples) ---
-DISCOUNT_RATE = 0.07
 OM_FRAC = 0.033
 
 battery_lifetime_years = 15
