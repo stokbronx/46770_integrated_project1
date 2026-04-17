@@ -212,6 +212,6 @@ Data/onshore_wind_1979-2017.csv
 Data/brazil_demand.csv
 Data/train-00000-of-00001.parquet
 Data/heatmapData_*.csv
-Data/demand_brazil.csv
+
 Data/not_used/
 .DS_Store
