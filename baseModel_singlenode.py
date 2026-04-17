@@ -144,13 +144,6 @@ gen_labels = {'hydro': 'Hydro', 'nuclear': 'Nuclear', 'biomass': 'Biomass',
 
 #%% LaTeX table: optimal capacities and annual generation
 
-print(f'biomass: {annualized_cost("biomass")}')
-print(f'hydro: {annualized_cost("hydro")}')
-print(f'nuclear: {annualized_cost("nuclear")}')
-print(f'solar: {annualized_cost("solar")}')
-print(f'onshorewind: {annualized_cost("wind")}')
-
-
 
 cap = n.generators.p_nom_opt[generators]
 gen = n.generators_t.p[generators].sum()
