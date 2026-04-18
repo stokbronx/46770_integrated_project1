@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 #%% IMPORT
 import pandas as pd
 pd.options.mode.string_storage = "python"
@@ -176,7 +178,7 @@ n.add("Generator",
 n.generators_t.p_max_pu
 
 
-# %% Optimize (baseline — no storage)
+# %% Optimize (baseline - no storage)
 # Keep an unfixed copy so we can run part (C) as a joint re-optimization with storage.
 n_before_opt = n.copy()
 
@@ -206,11 +208,11 @@ winter_slice = slice('2024-07-01', '2024-07-07')
 fig_dir = Path(__file__).resolve().parent / "figures"
 fig_dir.mkdir(exist_ok=True)
 dispatch_filenames = {
-    'Summer (Jan 7–13)': str(fig_dir / "dispatch_summer.png"),
-    'Winter (Jul 1–7)': str(fig_dir / "dispatch_winter.png"),
+    'Summer (Jan 7-13)': str(fig_dir / "dispatch_summer.png"),
+    'Winter (Jul 1-7)': str(fig_dir / "dispatch_winter.png"),
 }
 
-for period_name, sl in [('Summer (Jan 7–13)', summer_slice), ('Winter (Jul 1–7)', winter_slice)]:
+for period_name, sl in [('Summer (Jan 7-13)', summer_slice), ('Winter (Jul 1-7)', winter_slice)]:
     fig, ax = plt.subplots(figsize=(14, 5))
     dispatch = n.generators_t.p.loc[sl, generators]
     active = [g for g in generators if dispatch[g].sum() > 0]
@@ -220,7 +222,7 @@ for period_name, sl in [('Summer (Jan 7–13)', summer_slice), ('Winter (Jul 1�
     ax.plot(n.loads_t.p_set.loc[sl, 'load'], color='black', linewidth=1.5, label='Demand')
     ax.set_ylabel('Power [MW]')
     ax.set_xlabel('Time')
-    ax.set_title(f'Dispatch – {period_name}')
+    ax.set_title(f'Dispatch - {period_name}')
     ax.legend(loc='upper right', fancybox=True, shadow=True)
     fig.autofmt_xdate()
     plt.tight_layout()
@@ -284,21 +286,22 @@ plt.show()
 # All plotting/helpers below are confined to part (C); figures saved under figures/partC_*.png
 
 def _savefig_close_partc(fig, path: str) -> None:
-    """Save Part (C) figure and close — no plt.show() so the script does not block on C plots."""
+    """Save Part (C) figure and close - no plt.show() so the script does not block on C plots."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-# Battery capex (part C only)
-battery_capex_per_kW = 450  # $/kW
-battery_capex_per_MW = battery_capex_per_kW * 1000  # $/MW
+# Battery capex (part C only): split into power and energy components
+# Chosen so a 4h battery has total capex close to 450 $/kW:
+# 150,000 $/MW (power) + 4 * 75,000 $/MWh (energy) = 450,000 $/MW.
+battery_power_capex_per_MW = 150_000.0  # $/MW (converter / power block)
+battery_energy_capex_per_MWh = 75_000.0  # $/MWh (energy block)
 
 # --- Economic / technical assumptions (aligned with report + course examples) ---
 DISCOUNT_RATE = 0.07
 OM_FRAC = 0.033
 
 battery_lifetime_years = 15
-battery_max_hours = 4.0
 battery_eff_store = 0.95
 battery_eff_dispatch = 0.95
 
@@ -316,7 +319,8 @@ def _annuity_overnight_to_annualized(overnight_per_mw_or_mwh, lifetime_years):
     return annuity(lifetime_years, DISCOUNT_RATE) * overnight_per_mw_or_mwh * (1 + OM_FRAC)
 
 
-battery_capital_cost = _annuity_overnight_to_annualized(battery_capex_per_MW, battery_lifetime_years)
+battery_power_capital_cost = _annuity_overnight_to_annualized(battery_power_capex_per_MW, battery_lifetime_years)
+battery_energy_capital_cost = _annuity_overnight_to_annualized(battery_energy_capex_per_MWh, battery_lifetime_years)
 cap_h2_el = _annuity_overnight_to_annualized(h2_electrolyzer_capex_overnight, h2_chain_lifetime_years)
 cap_h2_fc = _annuity_overnight_to_annualized(h2_fuelcell_capex_overnight, h2_chain_lifetime_years)
 cap_h2_e = _annuity_overnight_to_annualized(h2_storage_capex_overnight, h2_chain_lifetime_years)
@@ -326,22 +330,45 @@ n_st = n_before_opt.copy()
 # Carriers / buses for H2
 n_st.add("Carrier", "battery")
 n_st.add("Carrier", "hydrogen")
+n_st.add("Bus", "bus battery", carrier="battery")
 n_st.add("Bus", "bus H2", carrier="hydrogen")
 
-# --- Battery (StorageUnit): 4h duration, ~90% round-trip via 0.95 * 0.95 ---
+# --- Battery (endogenous duration): charger/discharger links + energy store ---
+# Split power capex equally across charge/discharge links to avoid double counting.
 n_st.add(
-    "StorageUnit",
-    "battery",
-    bus="electricity bus",
+    "Link",
+    "battery charger",
+    bus0="electricity bus",
+    bus1="bus battery",
     carrier="battery",
     p_nom_extendable=True,
     p_nom=0.0,
-    max_hours=battery_max_hours,
-    efficiency_store=battery_eff_store,
-    efficiency_dispatch=battery_eff_dispatch,
-    capital_cost=battery_capital_cost,
+    efficiency=battery_eff_store,
+    capital_cost=0.5 * battery_power_capital_cost,
     marginal_cost=0.0,
-    cyclic_state_of_charge=True,
+)
+n_st.add(
+    "Link",
+    "battery discharger",
+    bus0="bus battery",
+    bus1="electricity bus",
+    carrier="battery",
+    p_nom_extendable=True,
+    p_nom=0.0,
+    efficiency=battery_eff_dispatch,
+    capital_cost=0.5 * battery_power_capital_cost,
+    marginal_cost=0.0,
+)
+n_st.add(
+    "Store",
+    "battery energy",
+    bus="bus battery",
+    carrier="battery",
+    e_nom_extendable=True,
+    e_nom=0.0,
+    e_cyclic=True,
+    capital_cost=battery_energy_capital_cost,
+    marginal_cost=0.0,
 )
 
 # --- Hydrogen: electrolyzer (Link) + store + fuel cell (Link) ---
@@ -351,6 +378,7 @@ n_st.add(
     "electrolyzer",
     bus0="electricity bus",
     bus1="bus H2",
+    carrier="hydrogen",
     p_nom_extendable=True,
     p_nom=0.0,
     efficiency=h2_electrolyzer_eff,
@@ -376,6 +404,7 @@ n_st.add(
     "fuel cell",
     bus0="bus H2",
     bus1="electricity bus",
+    carrier="hydrogen",
     p_nom_extendable=True,
     p_nom=0.0,
     efficiency=h2_fuelcell_eff,
@@ -403,13 +432,13 @@ _optimize_with_fallback(n_st, label="[with storage] ")
 Path("figures").mkdir(exist_ok=True)
 
 # ---------------------------------------------------------------------------
-# Part (C): systematic comparison — baseline vs with storage
+# Part (C): systematic comparison - baseline vs with storage
 # ---------------------------------------------------------------------------
 total_load_st = n_st.loads_t.p_set.sum().sum()
 total_load_base = n.loads_t.p_set.sum().sum()
 
 print("\n" + "=" * 72)
-print("PART (C) — BASELINE vs WITH STORAGE (optimal configuration & system cost)")
+print("PART (C) - BASELINE vs WITH STORAGE (optimal configuration & system cost)")
 print("=" * 72)
 
 print(f"\n{'Metric':<42} {'No storage':>14} {'With storage':>14}")
@@ -420,51 +449,54 @@ print(f"{'Average cost of electricity [$/MWh]':<42} {n.objective/total_load_base
 cap_base = n.generators.p_nom_opt
 cap_st = n_st.generators.p_nom_opt
 cap_delta = cap_st - cap_base
-print("\n--- Optimal generator capacities [MW]: Δ = with_storage − baseline ---")
+print("\n--- Optimal generator capacities [MW]: delta = with_storage - baseline ---")
 comp_cap = pd.DataFrame({"baseline_MW": cap_base, "with_storage_MW": cap_st, "delta_MW": cap_delta})
 print(comp_cap.round(2).to_string())
 
 print("\n--- Optimal storage & H2 chain (with storage only) ---")
-if not n_st.storage_units.empty:
-    print(n_st.storage_units[["p_nom_opt"]].to_string())
 if not n_st.stores.empty:
     print(n_st.stores[["e_nom_opt"]].to_string())
 if not n_st.links.empty:
     print(n_st.links[["p_nom_opt"]].to_string())
 
 # ---------------------------------------------------------------------------
-# Annual energy flows — interpret intraday (battery) vs longer (H2) balancing
+# Annual energy flows - interpret intraday (battery) vs longer (H2) balancing
 # ---------------------------------------------------------------------------
 
 def _annual_mwh(series):
-    """PyPSA time series are per snapshot (1 h); sum ≈ MWh/year."""
+    """PyPSA time series are per snapshot (1 h); sum ~= MWh/year."""
     return float(series.sum())
 
 
-# Battery: use dispatch/store if available, else net p
-su_t = n_st.storage_units_t
-if "battery" in n_st.storage_units.index:
-    try:
-        e_dis = _annual_mwh(su_t.p_dispatch["battery"])
-        e_ch = _annual_mwh(su_t.p_store["battery"])
-    except (KeyError, AttributeError, TypeError):
-        p = su_t.p["battery"]
-        e_dis = _annual_mwh(p.clip(lower=0.0))
-        e_ch = _annual_mwh((-p).clip(lower=0.0))
+def _annual_positive_flow_mwh(series):
+    """
+    Return annual positive flow magnitude regardless of PyPSA sign convention.
+    Uses the larger of positive-sum and negative-sum magnitudes.
+    """
+    pos = float(series.clip(lower=0.0).sum())
+    neg = float((-series).clip(lower=0.0).sum())
+    return max(pos, neg)
+
+
+# Battery: annual charge/discharge from links
+if {"battery charger", "battery discharger"}.issubset(set(n_st.links.index)):
+    p0_ch = n_st.links_t.p0["battery charger"]
+    p1_dis = n_st.links_t.p1["battery discharger"]
+    e_ch = _annual_positive_flow_mwh(p0_ch)
+    e_dis = _annual_positive_flow_mwh(p1_dis)
     print("\n--- Battery (annual energy, MWh) ---")
     print(f"  Discharge to grid (approx.): {e_dis:,.0f}")
     print(f"  Charge from grid (approx.): {e_ch:,.0f}")
 
 # H2: link power at electricity bus; store energy inventory
 if "electrolyzer" in n_st.links.index:
-    # Electricity consumed by electrolyzer ~ -p0 on electricity bus (sign depends on convention)
     el_p0 = n_st.links_t.p0["electrolyzer"]
-    print("\n--- Hydrogen — electrolyzer (annual, MWh elec) ---")
-    print(f"  Electricity use (sum |min(0,p0)|): {_annual_mwh((-el_p0).clip(lower=0.0)):,.0f}")
+    print("\n--- Hydrogen - electrolyzer (annual, MWh elec) ---")
+    print(f"  Electricity use (sign-robust from p0): {_annual_positive_flow_mwh(el_p0):,.0f}")
 if "fuel cell" in n_st.links.index:
     fc_p1 = n_st.links_t.p1["fuel cell"]
-    print("--- Hydrogen — fuel cell (annual, MWh elec out) ---")
-    print(f"  Electricity supplied (sum max(p1,0)): {_annual_mwh(fc_p1.clip(lower=0.0)):,.0f}")
+    print("--- Hydrogen - fuel cell (annual, MWh elec out) ---")
+    print(f"  Electricity supplied (sign-robust from p1): {_annual_positive_flow_mwh(fc_p1):,.0f}")
 if "H2 storage" in n_st.stores.index:
     e_level = n_st.stores_t.e["H2 storage"]
     print("--- H2 storage energy inventory ---")
@@ -472,21 +504,65 @@ if "H2 storage" in n_st.stores.index:
     print(f"  Min / max [MWh_H2]: {e_level.min():,.0f} / {e_level.max():,.0f}")
     # Simple seasonal proxy: range over rolling 24*7 h (~week) means
     roll = e_level.rolling(24 * 7, min_periods=1).mean()
-    print(f"  Rolling 7-d mean — min / max: {roll.min():,.0f} / {roll.max():,.0f}")
+    print(f"  Rolling 7-d mean - min / max: {roll.min():,.0f} / {roll.max():,.0f}")
 
 # ---------------------------------------------------------------------------
 # Figures for report: one PNG per figure (no subplots); no GUI pop-ups
 # ---------------------------------------------------------------------------
 gen_names = ["hydro", "nuclear", "biomass", "solar", "onshorewind"]
 
+# Part (C) figure typography (readable in reports / slides)
+_PARTC_TITLE_FS = 18
+_PARTC_LABEL_FS = 16
+_PARTC_TICK_FS = 14
+_PARTC_LEGEND_FS = 14
+# H2 multi-month plot: slightly larger still (wide x-axis, title must read clearly)
+_PARTC_H2_TITLE_FS = 20
+_PARTC_H2_LABEL_FS = 18
+_PARTC_H2_TICK_FS = 16
 
-def _plot_partc_week_separate_files(sl, title_season: str, file_prefix: str):
+
+def _apply_partc_fonts(
+    ax,
+    title: str = None,
+    xlabel: str = None,
+    ylabel: str = None,
+    title_fs: float | None = None,
+    label_fs: float | None = None,
+    tick_fs: float | None = None,
+):
+    tfs = title_fs if title_fs is not None else _PARTC_TITLE_FS
+    lfs = label_fs if label_fs is not None else _PARTC_LABEL_FS
+    kfs = tick_fs if tick_fs is not None else _PARTC_TICK_FS
+    if title is not None:
+        ax.set_title(title, fontsize=tfs)
+    if xlabel is not None:
+        ax.set_xlabel(xlabel, fontsize=lfs)
+    if ylabel is not None:
+        ax.set_ylabel(ylabel, fontsize=lfs)
+    ax.tick_params(axis="both", labelsize=kfs)
+
+
+def _plot_partc_week_separate_files(
+    sl,
+    title_season: str,
+    file_prefix: str,
+    sl_h2_storage=None,
+    title_h2_storage: str | None = None,
+):
     """
     Save separate images: generation, battery power, battery SOC, H2 power, H2 energy.
     file_prefix e.g. 'figures/partC_summer' -> partC_summer_gen_demand.png, ...
+    sl: time slice for gen/demand, battery, and H2 link power (typically one week).
+    sl_h2_storage: optional longer slice for H2 storage energy level (seasonal evolution).
+                   If None, uses sl (same as week).
+    title_h2_storage: optional full title for the H2 storage energy figure (use when
+                      sl_h2_storage spans months - avoid "week" in the title).
     """
     base = Path(file_prefix)
     base.parent.mkdir(parents=True, exist_ok=True)
+    if sl_h2_storage is None:
+        sl_h2_storage = sl
 
     # --- 1) Generation + demand (single figure) ---
     fig, ax = plt.subplots(figsize=(14, 5))
@@ -501,51 +577,53 @@ def _plot_partc_week_separate_files(sl, title_season: str, file_prefix: str):
             alpha=0.85,
         )
     ax.plot(n_st.loads_t.p_set.loc[sl, "load"], color="black", linewidth=1.5, label="Demand")
-    ax.set_ylabel("Power [MW]")
-    ax.set_xlabel("Time")
-    ax.set_title(f"{title_season} — generation & demand (with storage)")
-    ax.legend(loc="upper right", fontsize=8, ncol=2)
+    _apply_partc_fonts(
+        ax,
+        title=f"{title_season} - generation & demand (with storage)",
+        xlabel="Time",
+        ylabel="Power [MW]",
+    )
+    ax.legend(loc="upper right", fontsize=_PARTC_LEGEND_FS, ncol=2)
     fig.autofmt_xdate()
     plt.tight_layout()
     _savefig_close_partc(fig, f"{file_prefix}_gen_demand.png")
 
     # --- 2) Battery power only (single y-axis) ---
-    if "battery" in n_st.storage_units.index:
+    if {"battery charger", "battery discharger"}.issubset(set(n_st.links.index)):
         fig, ax = plt.subplots(figsize=(14, 4))
-        try:
-            dis = su_t.p_dispatch.loc[sl, "battery"]
-            ch = su_t.p_store.loc[sl, "battery"]
-            ax.plot(dis.index, dis.values, color="darkviolet", label="Discharge [MW]", linewidth=1.2)
-            ax.plot(ch.index, ch.values, color="mediumpurple", label="Charge [MW]", linewidth=1.2)
-        except (KeyError, AttributeError, TypeError):
-            p = su_t.p.loc[sl, "battery"]
-            ax.plot(p.index, p.clip(lower=0.0).values, color="darkviolet", label="Discharge (net) [MW]", linewidth=1.2)
-            ax.plot(p.index, (-p).clip(lower=0.0).values, color="mediumpurple", label="Charge (net) [MW]", linewidth=1.2)
-        ax.set_ylabel("Power [MW]")
-        ax.set_xlabel("Time")
-        ax.set_title(f"{title_season} — battery charge / discharge")
-        ax.legend(loc="upper right", fontsize=8)
+        p0_ch = n_st.links_t.p0.loc[sl, "battery charger"]
+        p1_dis = n_st.links_t.p1.loc[sl, "battery discharger"]
+        ax.plot(p1_dis.index, p1_dis.clip(lower=0.0).values, color="darkviolet", label="Discharge [MW]", linewidth=1.2)
+        ax.plot(p0_ch.index, (-p0_ch).clip(lower=0.0).values, color="mediumpurple", label="Charge [MW]", linewidth=1.2)
+        _apply_partc_fonts(
+            ax,
+            title=f"{title_season} - battery charge / discharge",
+            xlabel="Time",
+            ylabel="Power [MW]",
+        )
+        ax.legend(loc="upper right", fontsize=_PARTC_LEGEND_FS)
         fig.autofmt_xdate()
         plt.tight_layout()
         _savefig_close_partc(fig, f"{file_prefix}_battery_power.png")
 
-        # --- 3) Battery SOC (own figure — no twin axis with other series) ---
-        try:
-            soc = su_t.state_of_charge.loc[sl, "battery"]
-            fig, ax = plt.subplots(figsize=(14, 4))
+        # --- 3) Battery SOC / energy level from Store ---
+        if "battery energy" in n_st.stores.index:
+            soc = n_st.stores_t.e.loc[sl, "battery energy"]
+            fig, ax = plt.subplots(figsize=(14, 5))
             ax.fill_between(soc.index, soc.values, alpha=0.3, color="gray")
-            ax.plot(soc.index, soc.values, color="dimgray", linewidth=1.0, label="SOC")
-            ax.set_ylabel("State of charge [MWh]")
-            ax.set_xlabel("Time")
-            ax.set_title(f"{title_season} — battery state of charge")
-            ax.legend(loc="upper right", fontsize=8)
+            ax.plot(soc.index, soc.values, color="dimgray", linewidth=1.2, label="Stored energy")
+            _apply_partc_fonts(
+                ax,
+                title=f"{title_season} - battery state of charge",
+                xlabel="Time",
+                ylabel="Stored energy [MWh]",
+            )
+            ax.legend(loc="upper right", fontsize=_PARTC_LEGEND_FS)
             fig.autofmt_xdate()
             plt.tight_layout()
             _savefig_close_partc(fig, f"{file_prefix}_battery_soc.png")
-        except (KeyError, AttributeError, TypeError):
-            pass
 
-    # --- 4) H2: link powers (raw PyPSA — avoid clipping that hides small flows) ---
+    # --- 4) H2: link powers (raw PyPSA - avoid clipping that hides small flows) ---
     if "electrolyzer" in n_st.links.index or "fuel cell" in n_st.links.index:
         fig, ax = plt.subplots(figsize=(14, 4))
         if "electrolyzer" in n_st.links.index:
@@ -555,36 +633,56 @@ def _plot_partc_week_separate_files(sl, title_season: str, file_prefix: str):
             p1_fc = n_st.links_t.p1.loc[sl, "fuel cell"]
             ax.plot(p1_fc.index, p1_fc.values, color="coral", linewidth=1.2, label="Fuel cell bus1 power p1 [MW]")
         ax.axhline(0.0, color="k", linewidth=0.5, alpha=0.5)
-        ax.set_ylabel("Power [MW]")
-        ax.set_xlabel("Time")
-        ax.set_title(f"{title_season} — hydrogen links (raw solver output)")
-        ax.legend(loc="upper right", fontsize=8)
+        _apply_partc_fonts(
+            ax,
+            title=f"{title_season} - hydrogen links (raw solver output)",
+            xlabel="Time",
+            ylabel="Power [MW]",
+        )
+        ax.legend(loc="upper right", fontsize=_PARTC_LEGEND_FS)
         fig.autofmt_xdate()
         plt.tight_layout()
         _savefig_close_partc(fig, f"{file_prefix}_h2_link_power.png")
 
-    # --- 5) H2 storage energy (separate figure) ---
+    # --- 5) H2 storage energy (separate figure; multi-month window for seasonal view) ---
     if "H2 storage" in n_st.stores.index:
-        e = n_st.stores_t.e.loc[sl, "H2 storage"]
-        fig, ax = plt.subplots(figsize=(14, 4))
-        ax.plot(e.index, e.values, color="olive", linewidth=1.0)
-        ax.set_ylabel("Stored energy [MWh]")
-        ax.set_xlabel("Time")
-        ax.set_title(f"{title_season} — H2 storage energy level")
+        e = n_st.stores_t.e.loc[sl_h2_storage, "H2 storage"]
+        fig, ax = plt.subplots(figsize=(18, 6))
+        ax.plot(e.index, e.values, color="olive", linewidth=1.2)
+        if title_h2_storage is not None:
+            h2_title = title_h2_storage
+        elif sl_h2_storage == sl:
+            h2_title = f"{title_season} - H2 storage energy level"
+        else:
+            h2_title = f"{title_season} - H2 storage energy level (multi-month)"
+        _apply_partc_fonts(
+            ax,
+            title=h2_title,
+            xlabel="Time",
+            ylabel="Stored energy [MWh]",
+            title_fs=_PARTC_H2_TITLE_FS,
+            label_fs=_PARTC_H2_LABEL_FS,
+            tick_fs=_PARTC_H2_TICK_FS,
+        )
         fig.autofmt_xdate()
         plt.tight_layout()
         _savefig_close_partc(fig, f"{file_prefix}_h2_storage_energy.png")
 
 
+# One week: gen/demand, battery, H2 links. Several months: H2 tank energy only (own titles, no "week").
 _plot_partc_week_separate_files(
     slice("2024-01-07", "2024-01-13"),
     "Summer week (Jan, Brazil)",
     "figures/partC_summer",
+    sl_h2_storage=slice("2024-01-01", "2024-03-31"),
+    title_h2_storage="Summer period (Jan-Mar 2024, Brazil) - H2 storage energy level",
 )
 _plot_partc_week_separate_files(
     slice("2024-07-01", "2024-07-07"),
     "Winter week (Jul, Brazil)",
     "figures/partC_winter",
+    sl_h2_storage=slice("2024-07-01", "2024-09-30"),
+    title_h2_storage="Winter period (Jul-Sep 2024, Brazil) - H2 storage energy level",
 )
 
 # Annual mix: two separate pie charts (not side-by-side in one image)
@@ -592,8 +690,8 @@ mix_base = n.generators_t.p.sum()
 mix_st = n_st.generators_t.p.sum()
 
 for mix, ttl, out in [
-    (mix_base, "Annual generation — baseline (no storage)", "figures/partC_mix_baseline.png"),
-    (mix_st, "Annual generation — with storage", "figures/partC_mix_with_storage.png"),
+    (mix_base, "Annual generation - baseline (no storage)", "figures/partC_mix_baseline.png"),
+    (mix_st, "Annual generation - with storage", "figures/partC_mix_with_storage.png"),
 ]:
     fig, ax = plt.subplots(figsize=(6, 6))
     labels_m = [gen_labels[g] for g in gen_names if mix[g] > 0]
@@ -614,8 +712,8 @@ for mix, ttl, out in [
 # Annual mix: combined baseline vs storage (same as before, now with % labels)
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 for ax, mix, ttl in [
-    (axes[0], mix_base, "Annual generation — baseline (no storage)"),
-    (axes[1], mix_st, "Annual generation — with storage"),
+    (axes[0], mix_base, "Annual generation - baseline (no storage)"),
+    (axes[1], mix_st, "Annual generation - with storage"),
 ]:
     labels_m = [gen_labels[g] for g in gen_names if mix[g] > 0]
     sizes_m = [mix[g] for g in gen_names if mix[g] > 0]
@@ -631,14 +729,17 @@ for ax, mix, ttl in [
     ax.set_title(ttl)
 
 # Add storage sizing summary directly on the combined mix figure
-battery_p_opt = float(n_st.storage_units.p_nom_opt.get("battery", 0.0)) if not n_st.storage_units.empty else 0.0
-battery_e_opt = battery_p_opt * battery_max_hours
+battery_p_ch_opt = float(n_st.links.p_nom_opt.get("battery charger", 0.0)) if not n_st.links.empty else 0.0
+battery_p_dis_opt = float(n_st.links.p_nom_opt.get("battery discharger", 0.0)) if not n_st.links.empty else 0.0
+battery_p_opt = max(battery_p_ch_opt, battery_p_dis_opt)
+battery_e_opt = float(n_st.stores.e_nom_opt.get("battery energy", 0.0)) if not n_st.stores.empty else 0.0
+battery_duration_h = (battery_e_opt / battery_p_opt) if battery_p_opt > 0 else 0.0
 h2_e_opt = float(n_st.stores.e_nom_opt.get("H2 storage", 0.0)) if not n_st.stores.empty else 0.0
 fig.text(
     0.02,
     0.01,
     (
-        f"Optimized storage sizes:  Battery = {battery_p_opt:,.0f} MW ({battery_e_opt:,.0f} MWh @ {battery_max_hours:.0f}h),  "
+        f"Optimized storage sizes:  Battery = {battery_p_opt:,.0f} MW ({battery_e_opt:,.0f} MWh, ~{battery_duration_h:.2f} h),  "
         f"H2 storage = {h2_e_opt:,.0f} MWh"
     ),
     fontsize=9,
@@ -649,28 +750,28 @@ _savefig_close_partc(fig, "figures/partC_mix_baseline_vs_storage.png")
 
 # Report-ready bullet summary (paste into discussion)
 print("\n" + "=" * 72)
-print("PART (C) — DISCUSSION SNIPPET (strategies & time scales)")
+print("PART (C) - DISCUSSION SNIPPET (strategies & time scales)")
 print("=" * 72)
 print("""
-• Intraday: BESS (4 h) shifts energy within the day — compare battery charge/discharge
+* Intraday: BESS shifts energy within the day - compare battery charge/discharge
   plots to solar/demand; it reduces need for instant thermal/peaking response.
-• Multi-hour to seasonal: H2 store energy level can evolve over many days/weeks if
+* Multi-hour to seasonal: H2 store energy level can evolve over many days/weeks if
   electrolyzer + fuel cell are used; interpret H2 tank min/max and rolling means vs battery.
-• Optimal configuration: compare the table of generator ΔMW and installed MW of battery /
+* Optimal configuration: compare the table of generator delta MW and installed MW of battery /
   electrolyzer / fuel cell / H2 energy to describe how storage displaces or complements
   hydro/wind/solar in your run.
-• One-year horizon: true seasonal storage is only partially visible in 1 year; state how
-  H2 still provides longer buffering than the 4 h battery if e_nom_opt is large.
+* One-year horizon: true seasonal storage is only partially visible in 1 year; state how
+  H2 still provides longer buffering than battery when optimal battery duration remains short.
 """)
 print(
-    f"Optimized storage sizes -> Battery: {battery_p_opt:,.0f} MW ({battery_e_opt:,.0f} MWh), "
+    f"Optimized storage sizes -> Battery: {battery_p_opt:,.0f} MW ({battery_e_opt:,.0f} MWh, ~{battery_duration_h:.2f} h), "
     f"H2 storage: {h2_e_opt:,.0f} MWh"
 )
 print(
     "Figures saved (part C, one file per plot):\n"
     "  figures/partC_summer_gen_demand.png, partC_summer_battery_power.png, partC_summer_battery_soc.png,\n"
-    "  partC_summer_h2_link_power.png, partC_summer_h2_storage_energy.png\n"
-    "  figures/partC_winter_*.png (same pattern)\n"
+    "  figures/partC_summer_h2_link_power.png, figures/partC_summer_h2_storage_energy.png (Jan-Mar, multi-month)\n"
+    "  figures/partC_winter_*.png (same pattern; H2 storage Jul-Sep, multi-month)\n"
     "  figures/partC_mix_baseline.png, figures/partC_mix_with_storage.png"
 )
 print("=" * 72)
