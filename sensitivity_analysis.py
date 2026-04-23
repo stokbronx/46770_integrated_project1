@@ -10,7 +10,12 @@ from datapreparation import (
     G_REF, pc_ws, pc_kw, P_RATED,
     HUB_HEIGHT, REF_HEIGHT, ALPHA,
 )
-
+import importlib
+import parameters
+importlib.reload(parameters)
+from parameters import (
+    marginal_cost, annualized_cost, max_capacity_hydro,
+)
 REGIONS = ["N", "NE", "SE", "S"]
 YEARS = list(range(2005, 2025))
 MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -118,32 +123,7 @@ region = 'SE'
 demand_2024 = df_demand_raw.loc["2024"]
 demand_SE = demand_2024.loc[demand_2024["region"] == region, "demand_MW"].values
 
-#%% Model parameters
-
-capital_cost = dict(
-    hydro=3750000,
-    biomass=3750000,
-    nuclear=7500000,
-    wind=2100000,
-    solar=1250000,
-)
-
-marginal_cost = dict(
-    hydro=5,
-    biomass=75,
-    nuclear=12,
-    wind=0,
-    solar=0,
-)
-
-max_capacity_hydro = 40000
-
-
-def annuity(n, r):
-    if r > 0:
-        return r / (1.0 - 1.0 / (1.0 + r) ** n)
-    else:
-        return 1 / n
+#%% Model parameters imported from parameters.py
 
 
 #%% Helper: compute CFs for a given weather year from raw Renewables Ninja data
@@ -187,32 +167,35 @@ def run_model(weather_year: int, solver="gurobi"):
     n.add("Carrier", "gas", co2_emissions=0.19)
     n.add("Carrier", "onshorewind")
     n.add("Carrier", "solar")
+    n.add("Carrier", "biomass")
+    n.add("Carrier", "nuclear")
+    n.add("Carrier", "hydro")
 
     CF_wind = wind_cf[region][[h.strftime("%Y-%m-%dT%H:%M:%SZ") for h in n.snapshots]]
     n.add("Generator", "onshorewind", bus="electricity bus",
           p_nom_extendable=True, carrier="onshorewind",
-          capital_cost=annuity(30, 0.07) * capital_cost["wind"] * (1 + 0.033),
+          capital_cost=annualized_cost("wind"),
           marginal_cost=0, p_max_pu=CF_wind.values)
 
     CF_solar = solar_cf[region][[h.strftime("%Y-%m-%dT%H:%M:%SZ") for h in n.snapshots]]
     n.add("Generator", "solar", bus="electricity bus",
           p_nom_extendable=True, carrier="solar",
-          capital_cost=annuity(25, 0.07) * capital_cost["solar"] * (1 + 0.033),
+          capital_cost=annualized_cost("solar"),
           marginal_cost=0, p_max_pu=CF_solar.values)
 
     n.add("Generator", "biomass", bus="electricity bus",
           p_nom_extendable=True, carrier="biomass",
-          capital_cost=annuity(25, 0.07) * capital_cost["biomass"] * (1 + 0.033),
+          capital_cost=annualized_cost("biomass"),
           marginal_cost=marginal_cost["biomass"])
 
     n.add("Generator", "nuclear", bus="electricity bus",
           p_nom_extendable=True, carrier="nuclear",
-          capital_cost=annuity(60, 0.07) * capital_cost["nuclear"] * (1 + 0.033),
+          capital_cost=annualized_cost("nuclear"),
           marginal_cost=marginal_cost["nuclear"])
 
     n.add("Generator", "hydro", bus="electricity bus",
           p_nom_extendable=True, carrier="hydro",
-          capital_cost=annuity(60, 0.07) * capital_cost["hydro"] * (1 + 0.033),
+          capital_cost=annualized_cost("hydro"),
           marginal_cost=marginal_cost["hydro"],
           p_nom_max=max_capacity_hydro)
 
@@ -248,13 +231,61 @@ lcoe_all = pd.Series({yr: results[yr].objective / results[yr].loads_t.p_set.sum(
                        for yr in YEARS})
 
 
-#%% Print summary statistics
+#%% Installed capacity statistics (mean and std per technology)
+cap_stats = pd.DataFrame({
+    "Mean [MW]": cap_all.mean(axis=1),
+    "Std [MW]": cap_all.std(axis=1),
+})
+cap_stats = cap_stats.sort_values("Mean [MW]", ascending=False)
 
 print(f"\n{'='*60}")
-print("  OPTIMAL CAPACITY (MW) — Mean ± Std over 20 weather years")
+print("  INSTALLED CAPACITY (MW) — Mean ± Std by technology")
 print(f"{'='*60}")
-cap_stats = pd.DataFrame({'Mean': cap_all.mean(axis=1), 'Std': cap_all.std(axis=1)})
-print(cap_stats.round(1))
+print(cap_stats.round(1).to_string())
+
+
+#%% Plot: installed capacity mean ± std by technology
+fig, ax = plt.subplots(figsize=(9, 5))
+
+x = np.arange(len(cap_stats.index))
+bar_colors = [gen_colors[g] for g in gen_names]
+
+bars = ax.bar(
+    x,
+    cap_stats["Mean [MW]"],
+    yerr=cap_stats["Std [MW]"],
+    capsize=5,
+    color=bar_colors,
+    edgecolor="black",
+    linewidth=0.5,
+)
+ax.set_xticks(x)
+ax.set_xticklabels(cap_stats.index, rotation=0, fontsize=15)
+ax.set_ylabel("Installed Capacity [MW]", fontsize=17)
+ax.tick_params(axis="y", labelsize=15)
+
+# Annotate each bar with the corresponding standard deviation value
+ymax = (cap_stats["Mean [MW]"] + cap_stats["Std [MW]"]).max()
+ax.set_ylim(0, 1.14 * ymax)
+skip_std_labels = {"Onshore Wind", "Nuclear"}
+for label, bar, std_val in zip(cap_stats.index, bars, cap_stats["Std [MW]"].values):
+    if label in skip_std_labels:
+        continue
+    ax.text(
+        bar.get_x() + bar.get_width() / 2,
+        bar.get_height() + std_val + 0.02 * ymax,
+        f"σ={std_val:.0f} MW",
+        ha="center",
+        va="bottom",
+        fontsize=15,
+    )
+
+plt.tight_layout()
+fig.savefig("figures/capacity_mean_std.png", dpi=300, bbox_inches="tight")
+plt.show()
+
+
+#%% Print summary statistics
 
 print(f"\n{'='*60}")
 print("  ANNUAL GENERATION (TWh) — Mean ± Std over 20 weather years")
@@ -263,36 +294,6 @@ gen_stats = pd.DataFrame({'Mean': gen_all.mean(axis=1) / 1e6, 'Std': gen_all.std
 print(gen_stats.round(2))
 
 print(f"\n  LCOE: {lcoe_all.mean():.2f} ± {lcoe_all.std():.2f} $/MWh")
-
-
-#%% Plot: optimal capacity — mean ± 1σ across weather years
-
-fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-
-# Capacity bar chart with error bars
-cap_mean = cap_all.mean(axis=1)
-cap_std  = cap_all.std(axis=1)
-x = np.arange(len(cap_mean))
-bar_colors = [gen_colors[g] for g in gen_names]
-axes[0].bar(x, cap_mean, yerr=cap_std, capsize=5,
-            color=bar_colors, edgecolor='black', linewidth=0.5)
-axes[0].set_xticks(x)
-axes[0].set_xticklabels(cap_mean.index, rotation=0)
-axes[0].set_ylabel('Installed Capacity [MW]')
-axes[0].set_title('Optimal Capacity — Mean ± 1σ  (20 weather years)')
-
-# Generation bar chart with error bars
-gen_mean = gen_all.mean(axis=1) / 1e6
-gen_std  = gen_all.std(axis=1) / 1e6
-axes[1].bar(x, gen_mean, yerr=gen_std, capsize=5,
-            color=bar_colors, edgecolor='black', linewidth=0.5)
-axes[1].set_xticks(x)
-axes[1].set_xticklabels(gen_mean.index, rotation=0)
-axes[1].set_ylabel('Annual Generation [TWh]')
-axes[1].set_title('Annual Generation — Mean ± 1σ  (20 weather years)')
-
-plt.tight_layout()
-plt.show()
 
 
 #%% Plot: capacity per technology across weather years (scatter + mean line)
