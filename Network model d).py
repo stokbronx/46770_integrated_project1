@@ -309,14 +309,30 @@ plt.show()
 #%%######## Calculation of imbalance in the grid at the first timestep####################################
 t0 = network.snapshots[0]
 
+# Generation per bus
 gen_bus = network.generators_t.p.loc[t0].groupby(network.generators.bus).sum()
+
+# Load per bus
 load_bus = network.loads_t.p.loc[t0].groupby(network.loads.bus).sum()
 
-imbalance = gen_bus.sub(load_bus, fill_value=0)
+# 🔋 Storage per bus (IMPORTANT)
+# positive = discharge (supply), negative = charging (demand)
+storage_bus = network.storage_units_t.p.loc[t0].groupby(network.storage_units.bus).sum()
 
-print("Nodal imbalance at first timestep (MW):")
+# Replace NaNs with 0 to align indices
+gen_bus = gen_bus.reindex(network.buses.index).fillna(0)
+load_bus = load_bus.reindex(network.buses.index).fillna(0)
+storage_bus = storage_bus.reindex(network.buses.index).fillna(0)
+
+# ✅ Correct nodal balance (excluding flows for now)
+imbalance = gen_bus + storage_bus - load_bus
+
+print("Nodal balance WITHOUT flows (MW):")
 print(imbalance)
-network.lines_t.p0.loc[t0]
+
+# Line flows
+print("\nLine flows (MW):")
+print(network.lines_t.p0.loc[t0])
 
 # %% ################################ Visualization of regional dispatch vs demand ###############################
 
@@ -415,6 +431,7 @@ legend_elements = [
 
 plt.ylabel("Dispatch / Demand (TWh)")
 plt.xlabel("Region")
+plt.ylim(0,450)
 plt.title("Regional Electricity Dispatch vs Demand")
 plt.xticks(bar_positions, regions)
 plt.legend(handles=legend_elements + [plt.Rectangle((0,0),1,1,color=colors_map[tech]) for tech in technologies],
@@ -550,8 +567,6 @@ print(f"Battery capacity share: {battery_capacity_share:.2f}% of total system ca
 print(f"Dispatch share:        {battery_dispatch_share:.2f}% of total generation")
 
 #%%############################ LCOE calculation at each bus ######################################
-regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
-
 lcoe_results = {}
 
 for region in regions:
