@@ -132,9 +132,16 @@ print(f'Alternative way to find cost of electricity: {n.statistics.prices()}')
 n.generators.p_nom_opt # in MW
 
 annual_generation = n.generators_t.p.sum().rename('MWh/year')
-print("\nAnnual generation by technology (MWh):")
-print(annual_generation.to_string())
-print(f"\nTotal: {annual_generation.sum():.0f} MWh")
+installed_capacity = n.generators.p_nom_opt.rename("MW")
+tech_summary = pd.concat([installed_capacity, annual_generation], axis=1)
+tech_summary = tech_summary.rename(columns={"MW": "Installed capacity [MW]", "MWh/year": "Annual generation [MWh]"})
+tech_summary["Utilization [%]"] = (
+    100 * tech_summary["Annual generation [MWh]"] / (tech_summary["Installed capacity [MW]"] * 8760)
+).replace([float("inf"), -float("inf")], 0).fillna(0)
+
+print("\nInstalled capacity and annual generation by technology:")
+print(tech_summary.round(2).to_string())
+print(f"\nTotal annual generation: {tech_summary['Annual generation [MWh]'].sum():.0f} MWh")
 
 generators = ['hydro', 'nuclear', 'biomass', 'solar', 'onshorewind']
 gen_colors = {'hydro': 'royalblue', 'nuclear': 'mediumorchid', 'biomass': 'forestgreen',
@@ -142,33 +149,36 @@ gen_colors = {'hydro': 'royalblue', 'nuclear': 'mediumorchid', 'biomass': 'fores
 gen_labels = {'hydro': 'Hydro', 'nuclear': 'Nuclear', 'biomass': 'Biomass',
               'solar': 'Solar', 'onshorewind': 'Onshore Wind'}
 
-#%% LaTeX table: optimal capacities and annual generation
-
-
+#%% LaTeX table: capacity and generation shares (requested layout)
 cap = n.generators.p_nom_opt[generators]
 gen = n.generators_t.p[generators].sum()
 total_cap = cap.sum()
 total_gen = gen.sum()
 
+# Include only technologies with non-zero capacity or generation
+table_techs = [g for g in generators if cap[g] > 0 or gen[g] > 0]
+
 lines = []
-lines.append(r"\begin{table}[htbp]")
-lines.append(r"  \centering")
-lines.append(r"  \caption{Optimal installed capacity and annual generation — SE base model.}")
-lines.append(r"  \label{tab:base_model_results}")
-lines.append(r"  \begin{tabular}{l r r r r}")
-lines.append(r"    \toprule")
-lines.append(r"    Technology & Capacity [MW] & Share [\%] & Generation [TWh] & Share [\%] \\")
-lines.append(r"    \midrule")
-for g in generators:
-    c = cap[g]
-    c_pct = 100 * c / total_cap if total_cap > 0 else 0
-    e = gen[g] / 1e6
+lines.append(r"\begin{table}[h]")
+lines.append(r"    \centering")
+lines.append(r"    % \vspace{-10pt} % adjust if needed")
+lines.append(r"    \caption{Optimal installed capacity and annual generation in SE region.}")
+lines.append(r"    \label{tab:base_model_results}")
+lines.append(r"    \begin{tabular}{l r r r}")
+lines.append(r"        \toprule")
+lines.append(r"        Technology & Capacity [\%] & Generation [\%] & Utilization [\%] \\")
+lines.append(r"        \midrule")
+for g in table_techs:
+    c_pct = 100 * cap[g] / total_cap if total_cap > 0 else 0
     e_pct = 100 * gen[g] / total_gen if total_gen > 0 else 0
-    lines.append(f"    {gen_labels[g]} & {c:,.0f} & {c_pct:.1f} & {e:,.2f} & {e_pct:.1f} \\\\")
-lines.append(r"    \midrule")
-lines.append(f"    Total & {total_cap:,.0f} & 100.0 & {total_gen/1e6:,.2f} & 100.0 \\\\")
-lines.append(r"    \bottomrule")
-lines.append(r"  \end{tabular}")
+    util_pct = 100 * gen[g] / (cap[g] * 8760) if cap[g] > 0 else 0
+    lines.append(f"        {gen_labels[g]:<12s} & {c_pct:4.1f} & {e_pct:4.1f} & {util_pct:4.1f} \\\\")
+lines.append(r"        \midrule")
+total_util_pct = 100 * total_gen / (total_cap * 8760) if total_cap > 0 else 0
+lines.append(f"        Total        & {total_cap:,.0f} MW & {total_gen/1e6:,.2f} TWh & {total_util_pct:4.1f} \\\\")
+lines.append(r"        \bottomrule")
+lines.append(r"    \end{tabular}")
+lines.append(r"    \vspace{-5pt}")
 lines.append(r"\end{table}")
 
 latex_table = "\n".join(lines)
@@ -181,10 +191,14 @@ winter_slice = slice('2024-07-01', '2024-07-07')
 dispatch_filenames = {'Summer (Jan 8–14)': 'figures/dispatch_summer.png',
                       'Winter (Jul 1–7)': 'figures/dispatch_winter.png'}
 
+# Order stackplot from lower to higher marginal cost
+# (bottom of stack first): zero-cost technologies before positive-cost.
+dispatch_order = ['onshorewind', 'hydro', 'solar', 'nuclear', 'biomass']
+
 for period_name, sl in [('Summer (Jan 8–14)', summer_slice), ('Winter (Jul 1–7)', winter_slice)]:
     fig, ax = plt.subplots(figsize=(22, 5))
-    dispatch = n.generators_t.p.loc[sl, generators]
-    active = [g for g in generators if dispatch[g].sum() > 0]
+    dispatch = n.generators_t.p.loc[sl, dispatch_order]
+    active = [g for g in dispatch_order if dispatch[g].sum() > 0]
     ax.stackplot(dispatch.index, dispatch[active].values.T,
                  labels=[gen_labels[g] for g in active],
                  colors=[gen_colors[g] for g in active], alpha=0.85)

@@ -193,6 +193,16 @@ print("Total capex:", network.statistics.capex())
 print("Total opex:", network.statistics.opex())
 network.statistics.prices()
 
+# Installed capacities + annual generation by technology
+tech_summary = pd.DataFrame({
+    "Installed capacity [MW]": network.generators.groupby("carrier")["p_nom_opt"].sum(),
+    "Annual generation [MWh]": network.generators_t.p.sum().groupby(network.generators.carrier).sum(),
+}).reindex(technologies, fill_value=0)
+
+print("\nInstalled capacity and annual generation by technology:")
+print(tech_summary.round(2).to_string())
+print(f"\nTotal annual generation: {tech_summary['Annual generation [MWh]'].sum():,.0f} MWh")
+
 # %%
 network.generators.p_nom_opt # Optimal capacities of the generators
 # %%
