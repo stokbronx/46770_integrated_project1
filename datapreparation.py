@@ -1,7 +1,10 @@
 #%% IMPORT PACKAGES
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from pathlib import Path
+
+from parameters import cop_from_temperature
 
 # Data folder next to this script (works when run from any working directory)
 _DATA_DIR = Path(__file__).resolve().parent / "Data"
@@ -111,3 +114,73 @@ solar_cf_hourly = (df_irr_year / G_REF).clip(upper=1.0)
 
 print("\nSolar CF yearly averages (simplified irradiance model, T=25°C):")
 print(solar_cf_hourly.mean())
+
+
+#%% TEMPERATURE PROFILES — for time-varying heat-pump COP
+# Use one national temperature series from renewables.ninja and apply the same
+# COP profile to all model regions.
+_temp_path = _DATA_DIR / "renewablesNinjaData/ninja-weather-country-BR-temperature_area_wtd-merra2 (1).csv"
+
+if _temp_path.exists():
+    df_temp = pd.read_csv(
+        _temp_path,
+        skiprows=3,
+        index_col="time",
+        parse_dates=True,
+    )
+    temperature_hourly = df_temp[["BR"]].loc[f"{year_to_use}-01-01":f"{year_to_use}-12-31"]
+    print(f"\nTemperature data loaded from: {_temp_path.name}")
+    print("National yearly average temperature (°C):")
+    print(temperature_hourly["BR"].mean().round(2))
+else:
+    print(
+        "\n[WARNING] Temperature file not found in renewablesNinjaData. "
+        "Falling back to a constant 25 °C for COP calculations."
+    )
+    temperature_hourly = pd.DataFrame(
+        {"BR": 25.0},
+        index=wind_cf_hourly.index,
+    )
+
+
+#%% HEAT-PUMP COP PROFILES — computed from temperature_hourly
+# Uses the quadratic ASHP model in parameters.cop_from_temperature.
+
+HEAT_PUMP_T_SINK_C = 55.0   # heat-distribution supply temperature (°C)
+cop_common = cop_from_temperature(temperature_hourly["BR"], T_sink_celsius=HEAT_PUMP_T_SINK_C)
+cop_hourly = pd.DataFrame(
+    {
+        "N": cop_common.values,
+        "NE": cop_common.values,
+        "SE": cop_common.values,
+        "S": cop_common.values,
+    },
+    index=cop_common.index,
+)
+
+print("\nHeat-pump COP yearly averages (per region):")
+print(cop_hourly.mean().round(2))
+
+
+#%% COP plots (yearly and weekly)
+plt.figure(figsize=(12, 4))
+plt.plot(cop_common.index, cop_common.values, color="darkorange", linewidth=1.0)
+plt.title(f"Heat Pump COP - Full Year {year_to_use}")
+plt.xlabel("Time")
+plt.ylabel("COP")
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+week_start = cop_common.index.min()
+week_end = week_start + pd.Timedelta(days=7)
+cop_week = cop_common.loc[(cop_common.index >= week_start) & (cop_common.index < week_end)]
+
+plt.figure(figsize=(12, 4))
+plt.plot(cop_week.index, cop_week.values, color="teal", linewidth=1.2)
+plt.title(f"Heat Pump COP - One Week ({week_start.date()} to {(week_end - pd.Timedelta(hours=1)).date()})")
+plt.xlabel("Time")
+plt.ylabel("COP")
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()

@@ -523,11 +523,11 @@ ax.set_xlabel("Imposed CO2 constraint [Mton CO2]", fontsize=18)
 ax.set_ylabel("Generation mix share [-]", fontsize=18)
 ax.set_ylim(0, 1)
 ax.set_xlim(0, original_co2_emissions / 1e6)
-ax.set_title("Generation mix as a function of CO2 constraint", fontsize=20)
+#ax.set_title("Generation mix as a function of CO2 constraint", fontsize=20)
 ax.tick_params(axis="both", labelsize=14)
 ax.legend(
     loc="center left",
-    bbox_to_anchor=(0.82, 0.58),  # move left: mid-right placement inside the axes
+    bbox_to_anchor=(0.75, 0.58),  # move left: mid-right placement inside the axes
     fontsize=14,
 )
 ax.grid(alpha=0.25)
@@ -544,7 +544,7 @@ ax2.set_ylabel("System cost [M$]", color="black", fontsize=18)
 ax2.tick_params(axis="y", colors="black", labelsize=14)
 ax2.legend(
     loc="center left",
-    bbox_to_anchor=(0.82, 0.40),  # stacked below the stackplot legend
+    bbox_to_anchor=(0.75, 0.37),  # stacked below the stackplot legend
     fontsize=14,
 )
 

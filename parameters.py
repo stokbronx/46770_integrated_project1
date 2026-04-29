@@ -5,15 +5,17 @@ capital_cost = dict(  # in $/MW
     wind=1083000,
     solar=877000,
     gas=682600,
+    heat_pump=900000,   # large air-source HP, $/MW_th
 )
 
-opex_cost = dict(  # in $/MW
+opex_cost = dict(  # in $/MW/year (fixed O&M)
     hydro=19380,
     biomass=73120,
     nuclear=116000,
     wind=15200,
     solar=13000,
     gas=5610,
+    heat_pump=18000,
 )
 
 marginal_cost = dict(  # in $/MWh
@@ -23,6 +25,7 @@ marginal_cost = dict(  # in $/MWh
     wind=0,
     solar=0,
     gas=51.2,
+    heat_pump=0,
 )
 
 lifetime = dict( # in years
@@ -32,8 +35,10 @@ lifetime = dict( # in years
     wind=20,
     solar=25,
     gas=25,
+    heat_pump=20,
 )
 import numpy as np
+import pandas as pd
 def methane_capacity(D=0.6, u_H2=15, P_H2=50*100000, Z=1.31, 
                       R=8.314, M=0.016, T=273+25, e_H2=50):
     """
@@ -91,4 +96,44 @@ def annuity(n, r):
 def annualized_cost(tech):
     """Annualized capital cost + fixed O&M for a technology ($/MW/year)."""
     return annuity(lifetime[tech], DISCOUNT_RATE) * capital_cost[tech] + opex_cost[tech]
+
+
+def cop_from_temperature(
+    temperature_celsius,
+    T_sink_celsius=55.0,
+    cop_min=1.5,
+    cop_max=6.0,
+):
+    """Time-varying air-source heat-pump COP from ambient temperature.
+
+    Uses the quadratic ASHP regression (Ruhnau et al., 2019):
+
+        COP(ΔT) = 6.08 - 0.09*ΔT + 0.0005*ΔT²
+        where ΔT = T_sink - T_source, in °C.
+
+    The returned COP is clipped to [cop_min, cop_max] to keep values in a
+    realistic range for system modelling.
+
+    Parameters
+    ----------
+    temperature_celsius : pandas.Series, pandas.DataFrame, numpy.ndarray, or scalar
+        Source-side (ambient outdoor) temperature in degrees Celsius.
+    T_sink_celsius : float
+        Heat-distribution supply temperature in degrees Celsius (default 55 °C).
+    cop_min, cop_max : float
+        Lower / upper bound on the returned COP.
+
+    Returns
+    -------
+    Same container type as input, with COP values.
+    """
+    if isinstance(temperature_celsius, (pd.Series, pd.DataFrame)):
+        delta_t = T_sink_celsius - temperature_celsius
+        cop = 6.08 - 0.09 * delta_t + 0.0005 * delta_t**2
+        return cop.clip(lower=cop_min, upper=cop_max)
+
+    arr = np.asarray(temperature_celsius, dtype=float)
+    delta_t = T_sink_celsius - arr
+    cop = 6.08 - 0.09 * delta_t + 0.0005 * delta_t**2
+    return np.clip(cop, cop_min, cop_max)
 
