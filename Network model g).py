@@ -14,7 +14,7 @@ import parameters
 importlib.reload(parameters)
 from parameters import (
     capital_cost, opex_cost, marginal_cost, lifetime,
-    max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE,hydrogen_capacity
+    max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE,methane_capacity
 )
 
 
@@ -61,8 +61,8 @@ region_cf_map = {"BRA-N":"N","BRA-S":"S","BRA-NE":"NE","BRA-SE":"SE"}
 regions = ["BRA-N","BRA-NE","BRA-SE","BRA-S"]
 technologies = ["hydro","biomass","nuclear","wind","solar"]
 
-############################### Addition of hydrogen pipelines ##########################
-c_CH4, rho_CH4, capacity_CH4 = hydrogen_capacity()
+############################### Addition of gas pipelines ##########################
+c_CH4, rho_CH4, capacity_CH4 = methane_capacity()
 for region in regions:
     network.add(
         "Bus",

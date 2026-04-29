@@ -34,10 +34,10 @@ lifetime = dict(
     gas=25,
 )
 import numpy as np
-def hydrogen_capacity(D=0.6, u_H2=15, P_H2=50*100000, Z=1.31, 
+def methane_capacity(D=0.6, u_H2=15, P_H2=50*100000, Z=1.31, 
                       R=8.314, M=0.016, T=273+25, e_H2=50):
     """
-    Calculate hydrogen flow capacity.
+    Calculate methane flow capacity.
     Parameters:
     D      : Pipe diameter (m)
     u_H2   : Velocity (m/s)
@@ -68,7 +68,7 @@ def hydrogen_capacity(D=0.6, u_H2=15, P_H2=50*100000, Z=1.31,
 
 
 # Example usage
-c_gas, rho_gas, capacity_gas = hydrogen_capacity()
+c_gas, rho_gas, capacity_gas = methane_capacity()
 
 print("Speed of sound:", c_gas)
 print("Density:", rho_gas)
