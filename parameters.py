@@ -25,7 +25,7 @@ marginal_cost = dict(  # in $/MWh
     gas=51.2,
 )
 
-lifetime = dict(
+lifetime = dict( # in years
     hydro=30,
     biomass=20,
     nuclear=30,
@@ -76,7 +76,7 @@ print("Capacity:", capacity_gas)
 
 DISCOUNT_RATE = 0.07
 
-max_capacity_hydro = 40000
+max_capacity_hydro = 40000 # in MW
 
 
 def annuity(n, r):
