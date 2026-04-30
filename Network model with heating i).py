@@ -341,7 +341,7 @@ for region in regions:
 
 #%% Solve
 # CO2 cap (same GlobalConstraint approach as baseModel_storage_CO2.py)
-co2_limit = 50_000_000  # tCO2
+co2_limit = 50_240_000  # tCO2
 network.add(
     "GlobalConstraint",
     "co2_limit",
@@ -358,7 +358,69 @@ print("Objective value:", network.objective)
 print("Total system cost:", network.statistics.system_cost())
 print("Total capex:", network.statistics.capex())
 print("Total opex:", network.statistics.opex())
-network.statistics.prices()
+print("\nAverage nodal prices:")
+print(network.statistics.prices().mean().round(2))
+
+# CO2 metrics (same logic style as baseModel_storage_CO2.py)
+def _total_co2_emissions_t(net: pypsa.Network) -> float:
+    co2_intensity = net.generators.carrier.map(net.carriers.co2_emissions).fillna(0.0)
+    primary_input = net.generators_t.p.divide(net.generators.efficiency, axis=1)
+    return float(primary_input.mul(co2_intensity, axis=1).sum().sum())
+
+co2_emissions_t = _total_co2_emissions_t(network)
+co2_price = float(network.global_constraints.at["co2_limit", "mu"]) if "co2_limit" in network.global_constraints.index else float("nan")
+
+print(f"\nCO2 emissions [tCO2]: {co2_emissions_t:,.0f}")
+print(f"CO2 cap [tCO2]: {co2_limit:,.0f}")
+print(f"CO2 shadow price [$/tCO2]: {co2_price:,.2f}")
+
+# Relevant annual energy statistics
+elec_load_cols = network.loads.index[network.loads.index.str.startswith("load ")]
+heat_load_cols = network.loads.index[network.loads.index.str.contains("heat load")]
+heat_pump_cols = network.links.index[network.links.index.str.contains("heat pump")]
+gas_boiler_cols = network.links.index[network.links.index.str.contains("local gas boiler")]
+gas_supply_cols = network.generators.index[network.generators.index.str.contains("gas supply")]
+ccgt_cols = network.links.index[network.links.index.str.contains("gas plant")]
+
+elec_demand_mwh = float(network.loads_t.p_set.reindex(columns=elec_load_cols, fill_value=0.0).sum().sum())
+heat_demand_mwh = float(network.loads_t.p_set.reindex(columns=heat_load_cols, fill_value=0.0).sum().sum())
+heat_supply_hp_mwh = float((-network.links_t.p1.reindex(columns=heat_pump_cols, fill_value=0.0)).sum().sum())
+heat_supply_gb_mwh = float((-network.links_t.p1.reindex(columns=gas_boiler_cols, fill_value=0.0)).sum().sum())
+gas_supply_mwh = float(network.generators_t.p.reindex(columns=gas_supply_cols, fill_value=0.0).sum().sum())
+gas_to_boilers_mwh = float(network.links_t.p0.reindex(columns=gas_boiler_cols, fill_value=0.0).sum().sum())
+gas_to_ccgt_mwh = float(network.links_t.p0.reindex(columns=ccgt_cols, fill_value=0.0).sum().sum())
+
+print("\nAnnual system statistics:")
+print(pd.Series({
+    "electricity_demand_TWh": elec_demand_mwh / 1e6,
+    "heat_demand_TWh": heat_demand_mwh / 1e6,
+    "heat_supply_heat_pump_TWh": heat_supply_hp_mwh / 1e6,
+    "heat_supply_gas_boiler_TWh": heat_supply_gb_mwh / 1e6,
+    "gas_supply_TWh": gas_supply_mwh / 1e6,
+    "gas_to_boilers_TWh": gas_to_boilers_mwh / 1e6,
+    "gas_to_ccgt_TWh": gas_to_ccgt_mwh / 1e6,
+}).round(3))
+
+print("\nKey optimal capacities [MW]:")
+print("Generators:")
+print(network.generators.p_nom_opt.sort_values(ascending=False).round(2))
+print("\nLinks:")
+print(network.links.p_nom_opt.sort_values(ascending=False).round(2))
+print("\nStorage units:")
+print(network.storage_units.p_nom_opt.sort_values(ascending=False).round(2))
+
+# Quick consistency checks
+heat_balance_error = abs((heat_supply_hp_mwh + heat_supply_gb_mwh) - heat_demand_mwh)
+gas_balance_error = abs(gas_supply_mwh - (gas_to_boilers_mwh + gas_to_ccgt_mwh))
+cap_slack = co2_limit - co2_emissions_t
+print("\nConsistency checks:")
+print(f"Heat balance error [MWh]: {heat_balance_error:,.2f}")
+print(f"Gas balance error [MWh]: {gas_balance_error:,.2f}")
+print(f"CO2 cap slack [tCO2]: {cap_slack:,.2f}")
+if heat_balance_error > 1e-3:
+    print("[WARN] Non-zero heat balance error; inspect heat links/signs.")
+if gas_balance_error > 1e-3:
+    print("[WARN] Non-zero gas balance error; inspect gas network/link dispatch.")
 
 # %%
 network.generators.p_nom_opt # Optimal capacities of the generators
