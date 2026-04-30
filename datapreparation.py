@@ -29,6 +29,107 @@ demand_south      = df_demand.loc[df_demand["region"] == "S",  "demand_MW"]
 demand_north_east = df_demand.loc[df_demand["region"] == "NE", "demand_MW"]
 demand_south_east = df_demand.loc[df_demand["region"] == "SE", "demand_MW"]
 
+#%% DOMESTIC HOT WATER (DHW) HEAT DEMAND PROFILE
+# Build an hourly DHW profile from:
+# 1) fixed national yearly target (MWh/year)
+# 2) normalized daily pattern (morning/evening peaks)
+# 3) regional allocation based on each region's annual electricity-demand share
+DHW_ANNUAL_TOTAL_TWH = 36.0
+DHW_ANNUAL_TOTAL_MWH = DHW_ANNUAL_TOTAL_TWH * 1_000_000
+
+dhw_daily_shape = np.array([
+    0.015, 0.010, 0.008, 0.008, 0.015, 0.035, 0.060, 0.070,
+    0.055, 0.045, 0.035, 0.030, 0.030, 0.030, 0.032, 0.035,
+    0.040, 0.060, 0.090, 0.110, 0.095, 0.060, 0.030, 0.017,
+], dtype=float)
+dhw_daily_shape = dhw_daily_shape / dhw_daily_shape.sum()
+
+weekday_factor = 1.00
+weekend_factor = 1.08
+
+_dhw_index = demand_north.index
+hourly_base = pd.Series(dhw_daily_shape[_dhw_index.hour], index=_dhw_index)
+day_factor = np.where(_dhw_index.dayofweek >= 5, weekend_factor, weekday_factor)
+hourly_shape = hourly_base * day_factor
+hourly_shape = hourly_shape / hourly_shape.sum()
+
+demand_by_region = {
+    "N": demand_north,
+    "NE": demand_north_east,
+    "SE": demand_south_east,
+    "S": demand_south,
+}
+
+dhw_heat_hourly = pd.DataFrame(index=_dhw_index)
+annual_demand_by_region_mwh = {
+    region: float(demand_ts.sum()) for region, demand_ts in demand_by_region.items()
+}
+annual_demand_total_mwh = sum(annual_demand_by_region_mwh.values())
+
+for region, demand_ts in demand_by_region.items():
+    region_share = annual_demand_by_region_mwh[region] / annual_demand_total_mwh
+    annual_target_mwh = DHW_ANNUAL_TOTAL_MWH * region_share
+    dhw_heat_hourly[region] = annual_target_mwh * hourly_shape.values
+
+print(f"\nDHW fixed national yearly demand target: {DHW_ANNUAL_TOTAL_TWH:.1f} TWh")
+print("DHW yearly heat demand by region (MWh):")
+print(dhw_heat_hourly.sum().round(0))
+
+# Annual electricity and heat-demand summary
+electricity_demand_hourly = pd.DataFrame(
+    {
+        "N": demand_north,
+        "NE": demand_north_east,
+        "SE": demand_south_east,
+        "S": demand_south,
+    }
+).reindex(_dhw_index)
+
+annual_electricity_by_region = electricity_demand_hourly.sum()
+annual_heat_by_region = dhw_heat_hourly.sum()
+
+print("\nAnnual electricity demand by region (MWh):")
+print(annual_electricity_by_region.round(0))
+print("Annual DHW heat demand by region (MWh):")
+print(annual_heat_by_region.round(0))
+print("Annual national demand totals (TWh):")
+print(
+    pd.Series(
+        {
+            "electricity_TWh": annual_electricity_by_region.sum() / 1_000_000,
+            "dhw_heat_TWh": annual_heat_by_region.sum() / 1_000_000,
+        }
+    ).round(2)
+)
+
+# January plot: total electricity and DHW heat demand
+january_mask = _dhw_index.month == 1
+january_electricity_total = electricity_demand_hourly.sum(axis=1).loc[january_mask]
+january_heat_total = dhw_heat_hourly.sum(axis=1).loc[january_mask]
+
+plt.figure(figsize=(12, 4))
+plt.plot(
+    january_electricity_total.index,
+    january_electricity_total.values,
+    label="Electricity demand",
+    linewidth=1.1,
+    color="royalblue",
+)
+plt.plot(
+    january_heat_total.index,
+    january_heat_total.values,
+    label="DHW heat demand",
+    linewidth=1.1,
+    color="firebrick",
+)
+plt.title(f"January demand profiles ({year_to_use})")
+plt.xlabel("Time")
+plt.ylabel("Demand (MW)")
+plt.grid(alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
 
 #%% WIND CAPACITY FACTOR PROFILES — derived from power curve + wind speed data
 # Power curve for a ~3.3 MW turbine (read from manufacturer data sheet).
@@ -160,6 +261,19 @@ cop_hourly = pd.DataFrame(
 
 print("\nHeat-pump COP yearly averages (per region):")
 print(cop_hourly.mean().round(2))
+
+#%% YEARLY WEATHER SUMMARY
+weather_yearly = pd.DataFrame(
+    {
+        "wind_speed_m_per_s": df_wind_year.mean(),
+        "irradiance_w_per_m2": df_irr_year.mean(),
+    }
+)
+
+print(f"\nYearly weather summary ({year_to_use}):")
+print(weather_yearly.round(2))
+print("National yearly average temperature (°C):")
+print(round(float(temperature_hourly["BR"].mean()), 2))
 
 
 #%% COP plots (yearly and weekly)

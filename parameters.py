@@ -6,6 +6,11 @@ capital_cost = dict(  # in $/MW
     solar=877000,
     gas=682600,
     heat_pump=900000,   # large air-source HP, $/MW_th
+    # Local residential gas boiler (for DHW/space heating):
+    # Based on literature value 4422.2 EUR per unit (20-year life) and
+    # assuming ~20 kW_th unit size -> ~221 EUR/kW_th = 221,000 EUR/MW_th.
+    # Converted at ~1.08 USD/EUR -> ~239,000 USD/MW_th.
+    gas_boiler_local=239000,
 )
 
 opex_cost = dict(  # in $/MW/year (fixed O&M)
@@ -16,6 +21,8 @@ opex_cost = dict(  # in $/MW/year (fixed O&M)
     solar=13000,
     gas=5610,
     heat_pump=18000,
+    # Literature rule-of-thumb: fixed O&M = 2.5% of investment cost/year.
+    gas_boiler_local=5975,
 )
 
 marginal_cost = dict(  # in $/MWh
@@ -26,7 +33,13 @@ marginal_cost = dict(  # in $/MWh
     solar=0,
     gas=51.2,
     heat_pump=0,
+    # Fuel-only marginal heat cost:
+    # p_gas,household,BR ~ 0.176 USD/kWh_fuel  -> 176 USD/MWh_fuel
+    # eta_boiler = 0.90  -> 176 / 0.90 = 195.6 USD/MWh_heat
+    gas_boiler_local=51.2,
 )
+
+gas_efficiency = 0.55
 
 lifetime = dict( # in years
     hydro=30,
@@ -36,6 +49,7 @@ lifetime = dict( # in years
     solar=25,
     gas=25,
     heat_pump=20,
+    gas_boiler_local=20,
 )
 import numpy as np
 import pandas as pd

@@ -8,7 +8,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from datapreparation import (
     demand_north, demand_south, demand_north_east, demand_south_east,
-    wind_cf_hourly, solar_cf_hourly, cop_hourly,
+    wind_cf_hourly, solar_cf_hourly, cop_hourly, dhw_heat_hourly,
 )
 import importlib
 import parameters
@@ -22,11 +22,17 @@ network = pypsa.Network()
 
 network.add(
     "Carrier",
-    ["hydro", "biomass", "nuclear", "wind", "solar", "battery", "gas", "heat", "heat_pump", "gas_boiler"],
-    nice_name=["Hydro", "Biomass", "Nuclear", "Wind", "Solar", "Battery", "Gas", "Heat", "Heat pump", "Gas boiler"],
+    ["hydro", "biomass", "nuclear", "wind", "solar", "battery", "gas", "heat", "heat_pump", "gas_boiler_local"],
+    nice_name=["Hydro", "Biomass", "Nuclear", "Wind", "Solar", "Battery", "Gas", "Heat", "Heat pump", "Local gas boiler"],
     color=["aquamarine", "sienna", "purple", "dodgerblue", "gold", "violet", "gray", "red", "orange", "brown"]
 )
 network.add("Carrier", "AC")
+
+# CO2 intensities (tCO2/MWh_primary)
+network.carriers.loc["gas", "co2_emissions"] = 0.19
+network.carriers.loc["biomass", "co2_emissions"] = 0.210
+for c in ["hydro", "nuclear", "wind", "solar", "battery", "heat", "heat_pump", "gas_boiler_local", "AC"]:
+    network.carriers.loc[c, "co2_emissions"] = 0.0
 
 
 network.add("Bus", "bus BRA-N",
@@ -66,7 +72,7 @@ region_bus_coords = {
     "BRA-S": (-51.2, -30.0),
 }
 
-############################### Addition of hydrogen pipelines ##########################
+############################### Addition of gas network ##########################
 c_CH4, rho_CH4, capacity_CH4 = methane_capacity()
 for region in regions:
     network.add(
@@ -84,17 +90,49 @@ gas_pipelines = [
     ("BRA-SE", "BRA-N"),
 ]
 
+# Gas transport assumptions (aligned with Network model g))
+gas_pipeline_efficiency = 0.995            # 0.5% loss per segment
+gas_transport_marginal_cost = 0          # $/MWh_gas transported
+gas_pipeline_capital_cost = 0           # $/MW-year transport capacity
+
 for n0, n1 in gas_pipelines:
     network.add(
         "Link",
-        f"gas pipeline {n0}-{n1}",
+        f"gas pipeline {n0}->{n1}",
         bus0=f"gas {n0}",
         bus1=f"gas {n1}",
         p_nom=0,
         p_nom_extendable=True,
         carrier="gas",
-        efficiency=1.0,
-        marginal_cost=0.0
+        efficiency=gas_pipeline_efficiency,
+        capital_cost=gas_pipeline_capital_cost,
+        marginal_cost=gas_transport_marginal_cost,
+    )
+    network.add(
+        "Link",
+        f"gas pipeline {n1}->{n0}",
+        bus0=f"gas {n1}",
+        bus1=f"gas {n0}",
+        p_nom=0,
+        p_nom_extendable=True,
+        carrier="gas",
+        efficiency=gas_pipeline_efficiency,
+        capital_cost=gas_pipeline_capital_cost,
+        marginal_cost=gas_transport_marginal_cost,
+    )
+
+# Commodity gas supply at each regional gas bus.
+# This is the source that can feed local boilers and inter-regional gas flows.
+for region in regions:
+    network.add(
+        "Generator",
+        f"{region} gas supply",
+        bus=f"gas {region}",
+        carrier="gas",
+        p_nom_extendable=True,
+        p_nom=0,
+        capital_cost=0.0,
+        marginal_cost=marginal_cost["gas"],
     )
 
 
@@ -218,18 +256,19 @@ for region in regions:
 
     network.add(
         "Link",
-        f"{region} gas heat plant",
+        f"{region} local gas boiler",
         bus0=f"gas {region}",
         bus1=f"heating {region}",
-        carrier="gas_boiler",
+        carrier="gas_boiler_local",
 
         efficiency=0.9,
 
         p_nom=0,
         p_nom_extendable=True,
 
-        capital_cost=annualized_cost("gas"),
-        marginal_cost=marginal_cost["gas"]
+        capital_cost=annualized_cost("gas_boiler_local"),
+        # Fuel cost is paid at "gas supply"; keep link marginal at 0 to avoid double-counting.
+        marginal_cost=0.0
     )
 
 # ============================
@@ -284,10 +323,13 @@ for region, demand_ts in demand.items():
         overwrite=True
     )
 
-# Add heating demand at each heating bus (fraction of regional electricity demand)
-heat_demand_share = 0.35
-for region, demand_ts in demand.items():
-    heat_ts = (heat_demand_share * demand_ts).reindex(network.snapshots).fillna(0)
+# Add DHW heating demand at each heating bus (hourly shaped profile from datapreparation)
+for region in regions:
+    heat_ts = (
+        dhw_heat_hourly[region_cf_map[region]]
+        .reindex(network.snapshots)
+        .fillna(0)
+    )
     network.add(
         "Load",
         f"heat load {region}",
@@ -298,6 +340,17 @@ for region, demand_ts in demand.items():
 
 
 #%% Solve
+# CO2 cap (same GlobalConstraint approach as baseModel_storage_CO2.py)
+co2_limit = 50_000_000  # tCO2
+network.add(
+    "GlobalConstraint",
+    "co2_limit",
+    type="primary_energy",
+    carrier_attribute="co2_emissions",
+    sense="<=",
+    constant=co2_limit,
+)
+
 network.optimize(solver_name="gurobi")
 
 #%% Results
@@ -317,10 +370,136 @@ network.generators_t.p # Optimal dispatch of the generators over time
 # %%
 
 gas_plants = network.links[
-    network.links.index.str.contains("gas heat plant")
+    network.links.index.str.contains("local gas boiler")
 ]
 
 print(gas_plants[["bus0", "bus1", "p_nom_opt"]])
+
+# %% Yearly heating supply mix (heat pump vs gas boiler)
+heat_pump_links = network.links.index[network.links.index.str.contains("heat pump")]
+gas_boiler_links = network.links.index[network.links.index.str.contains("local gas boiler")]
+
+# p1 is heat output at heating bus for these links
+heat_pump_supply_mwh = -network.links_t.p1.reindex(columns=heat_pump_links, fill_value=0.0).sum().sum()
+gas_boiler_supply_mwh = -network.links_t.p1.reindex(columns=gas_boiler_links, fill_value=0.0).sum().sum()
+
+heating_supply_twh = pd.Series(
+    {
+        "heat_pump": heat_pump_supply_mwh / 1_000_000,
+        "gas_boiler": gas_boiler_supply_mwh / 1_000_000,
+    }
+)
+heating_supply_twh = heating_supply_twh[heating_supply_twh > 0]
+
+if heating_supply_twh.empty:
+    print("[INFO] Heating supply pie chart skipped: no positive heat supply found.")
+else:
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.pie(
+        heating_supply_twh.values,
+        labels=heating_supply_twh.index,
+        colors=["orange", "brown"][:len(heating_supply_twh)],
+        autopct="%1.1f%%",
+        startangle=90,
+        pctdistance=0.65,
+        textprops={"fontsize": 11},
+    )
+    ax.set_title("Yearly heating supply mix")
+    ax.axis("equal")
+    plt.tight_layout()
+    plt.show()
+
+# %% Weekly/period dispatch plots (electricity + heat)
+plot_year = int(network.snapshots[0].year)
+periods = {
+    f"January {plot_year}": slice(f"{plot_year}-01-01", f"{plot_year}-01-31"),
+    f"20-26 January {plot_year}": slice(f"{plot_year}-01-20", f"{plot_year}-01-26"),
+}
+
+for period_label, period in periods.items():
+    # Electricity side: aggregate generation by carrier and include CCGT link output
+    gen_by_carrier = network.generators_t.p.groupby(network.generators.carrier, axis=1).sum()
+    ccgt_cols = network.links.index[network.links.index.str.contains("gas plant")]
+    ccgt_el = -network.links_t.p1.reindex(columns=ccgt_cols, fill_value=0.0).sum(axis=1)
+
+    elec_df = pd.DataFrame(index=network.snapshots)
+    elec_df["hydro"] = gen_by_carrier["hydro"] if "hydro" in gen_by_carrier.columns else 0.0
+    elec_df["wind"] = gen_by_carrier["wind"] if "wind" in gen_by_carrier.columns else 0.0
+    elec_df["solar"] = gen_by_carrier["solar"] if "solar" in gen_by_carrier.columns else 0.0
+    elec_df["biomass"] = gen_by_carrier["biomass"] if "biomass" in gen_by_carrier.columns else 0.0
+    elec_df["nuclear"] = gen_by_carrier["nuclear"] if "nuclear" in gen_by_carrier.columns else 0.0
+    elec_df["ccgt"] = ccgt_el
+    elec_df = elec_df.loc[period]
+
+    elec_load_cols = network.loads.index[network.loads.index.str.startswith("load ")]
+    elec_demand = network.loads_t.p_set.reindex(columns=elec_load_cols, fill_value=0.0).sum(axis=1).loc[period]
+
+    heat_pump_cols = network.links.index[network.links.index.str.contains("heat pump")]
+    heat_pump_el_demand = network.links_t.p0.reindex(columns=heat_pump_cols, fill_value=0.0).sum(axis=1).loc[period]
+
+    elec_demand_total = elec_demand + heat_pump_el_demand
+
+    battery_cols = network.storage_units.index[network.storage_units.index.str.contains("battery")]
+    battery_dispatch = network.storage_units_t.p.reindex(columns=battery_cols, fill_value=0.0).sum(axis=1).loc[period]
+    elec_demand_plus_battery = elec_demand_total - battery_dispatch
+
+    ax = elec_df.clip(lower=0).plot.area(
+        figsize=(12, 4),
+        linewidth=0,
+        color=["blue", "lightskyblue", "yellow", "green", "purple", "red"],
+    )
+    elec_demand_total.plot(
+        ax=ax,
+        color="black",
+        linewidth=1.5,
+        label="el demand + heat pump el demand",
+    )
+    elec_demand_plus_battery.plot(
+        ax=ax,
+        color="black",
+        linestyle="--",
+        linewidth=1.5,
+        label="el demand + heat pump + battery",
+    )
+    ax.set_ylabel("Electricity dispatch [MW]")
+    ax.set_title(f"Electricity dispatch ({period_label})")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left", ncol=2)
+    plt.tight_layout()
+    plt.show()
+
+    # Heat side: heat pump + local gas boiler
+    heat_pump_heat = -network.links_t.p1.reindex(columns=heat_pump_cols, fill_value=0.0).sum(axis=1)
+    gas_boiler_cols = network.links.index[network.links.index.str.contains("local gas boiler")]
+    gas_boiler_heat = -network.links_t.p1.reindex(columns=gas_boiler_cols, fill_value=0.0).sum(axis=1)
+
+    heat_df = pd.DataFrame(
+        {
+            "gas boiler": gas_boiler_heat.loc[period],
+            "heat pump": heat_pump_heat.loc[period],
+        }
+    )
+
+    heat_load_cols = network.loads.index[network.loads.index.str.contains("heat load")]
+    heat_demand = network.loads_t.p_set.reindex(columns=heat_load_cols, fill_value=0.0).sum(axis=1).loc[period]
+
+    ax = heat_df.clip(lower=0).plot.area(
+        figsize=(12, 4),
+        linewidth=0,
+        color=["brown", "orange"],
+    )
+    heat_demand.plot(
+        ax=ax,
+        color="black",
+        linewidth=1.5,
+        label="heat demand",
+    )
+    ax.set_ylabel("Heat dispatch [MW]")
+    ax.set_title(f"Heat dispatch ({period_label})")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left")
+    plt.tight_layout()
+    plt.show()
 # %% PLOTS
 # Full-system map (electricity + gas + heat buses)
 carrier_colors = {
