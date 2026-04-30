@@ -5,7 +5,7 @@ capital_cost = dict(  # in $/MW
     wind=1083000,
     solar=877000,
     gas=682600,
-    heat_pump=900000,   # large air-source HP, $/MW_th
+    heat_pump=932000,   # large air-source HP, $/MW_th
     # Local residential gas boiler (for DHW/space heating):
     # Based on literature value 4422.2 EUR per unit (20-year life) and
     # assuming ~20 kW_th unit size -> ~221 EUR/kW_th = 221,000 EUR/MW_th.
@@ -20,7 +20,7 @@ opex_cost = dict(  # in $/MW/year (fixed O&M)
     wind=15200,
     solar=13000,
     gas=5610,
-    heat_pump=18000,
+    heat_pump=capital_cost["heat_pump"] * 0.025,
     # Literature rule-of-thumb: fixed O&M = 2.5% of investment cost/year.
     gas_boiler_local=5975,
 )
