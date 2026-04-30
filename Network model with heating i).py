@@ -341,7 +341,7 @@ for region in regions:
 
 #%% Solve
 # CO2 cap (same GlobalConstraint approach as baseModel_storage_CO2.py)
-co2_limit = 50_240_000  # tCO2
+co2_limit = 5_420_000  # tCO2
 network.add(
     "GlobalConstraint",
     "co2_limit",
