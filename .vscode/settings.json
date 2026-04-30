@@ -1,0 +1,8 @@
+{
+  "python.defaultInterpreterPath": "C:/Users/samue/anaconda3/envs/data_M_py310/python.exe",
+  "python.terminal.activateEnvironment": true,
+  "code-runner.runInTerminal": true,
+  "code-runner.executorMap": {
+    "python": "\"C:/Users/samue/anaconda3/envs/data_M_py310/python.exe\""
+  }
+}

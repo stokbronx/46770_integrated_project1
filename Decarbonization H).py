@@ -14,7 +14,7 @@ from datapreparation import (
 )
 
 importlib.reload(parameters)
-from parameters import max_capacity_hydro, annuity, annualized_cost, marginal_cost, methane_capacity
+from parameters import max_capacity_hydro, annuity, annualized_cost, marginal_cost, methane_capacity, gas_efficiency
 
 
 regions = ["BRA-N", "BRA-NE", "BRA-SE", "BRA-S"]
@@ -27,9 +27,9 @@ def build_base_network() -> pypsa.Network:
 
     n.add(
         "Carrier",
-        ["hydro", "biomass", "nuclear", "wind", "solar", "battery", "H2", "gas"],
-        nice_name=["Hydro", "Biomass", "Nuclear", "Wind", "Solar", "Battery", "Hydrogen", "Gas"],
-        color=["aquamarine", "sienna", "purple", "dodgerblue", "gold", "violet", "green", "gray"],
+        ["hydro", "biomass", "nuclear", "wind", "solar", "battery", "H2", "gas", "ccgt"],
+        nice_name=["Hydro", "Biomass", "Nuclear", "Wind", "Solar", "Battery", "Hydrogen", "Gas", "CCGT"],
+        color=["aquamarine", "sienna", "purple", "dodgerblue", "gold", "violet", "green", "gray", "dimgray"],
     )
     n.add("Carrier", "AC")
 
@@ -43,22 +43,65 @@ def build_base_network() -> pypsa.Network:
     n.add("Line", " line SE-S", bus0="bus BRA-SE", bus1="bus BRA-S", x=0.1, r=0.01, carrier="AC", s_nom=1100)
     n.add("Line", " line SE-N", bus0="bus BRA-SE", bus1="bus BRA-N", x=0.1, r=0.01, carrier="AC", s_nom=1100)
 
+    region_bus_coords = {
+        "BRA-N": (-60.0, -3.0),
+        "BRA-NE": (-38.5, -12.9),
+        "BRA-SE": (-46.6, -19.5),
+        "BRA-S": (-51.2, -30.0),
+    }
+
     # Gas buses and pipelines (same setup as Network model g).py)
     c_CH4, rho_CH4, capacity_CH4 = methane_capacity()
     for region in regions:
-        n.add("Bus", f"gas {region}", carrier="gas")
+        n.add(
+            "Bus",
+            f"gas {region}",
+            carrier="gas",
+            x=region_bus_coords[region][0] - 1.2,
+            y=region_bus_coords[region][1] - 1.2,
+        )
+
+    gas_pipeline_efficiency = 0.995
+    gas_transport_marginal_cost = 0.0
+    gas_pipeline_capital_cost = 0.0
 
     for n0, n1 in [("BRA-N", "BRA-NE"), ("BRA-NE", "BRA-SE"), ("BRA-SE", "BRA-S"), ("BRA-SE", "BRA-N")]:
         n.add(
             "Link",
-            f"gas pipeline {n0}-{n1}",
+            f"gas pipeline {n0}->{n1}",
             bus0=f"gas {n0}",
             bus1=f"gas {n1}",
             p_nom=0,
             p_nom_extendable=True,
             carrier="gas",
-            efficiency=1.0,
-            marginal_cost=0.0,
+            efficiency=gas_pipeline_efficiency,
+            capital_cost=gas_pipeline_capital_cost,
+            marginal_cost=gas_transport_marginal_cost,
+        )
+        n.add(
+            "Link",
+            f"gas pipeline {n1}->{n0}",
+            bus0=f"gas {n1}",
+            bus1=f"gas {n0}",
+            p_nom=0,
+            p_nom_extendable=True,
+            carrier="gas",
+            efficiency=gas_pipeline_efficiency,
+            capital_cost=gas_pipeline_capital_cost,
+            marginal_cost=gas_transport_marginal_cost,
+        )
+
+    # Gas commodity supply at each regional gas bus
+    for region in regions:
+        n.add(
+            "Generator",
+            f"{region} gas supply",
+            bus=f"gas {region}",
+            carrier="gas",
+            p_nom=0,
+            p_nom_extendable=True,
+            capital_cost=0.0,
+            marginal_cost=gas_efficiency * marginal_cost["gas"],
         )
 
     # Snapshots
@@ -96,19 +139,19 @@ def build_base_network() -> pypsa.Network:
                 p_max_pu=p_max_pu,
             )
 
-    # Gas plants
+    # CCGT plants (gas -> electricity)
     for region in regions:
         n.add(
             "Link",
             f"{region} gas plant",
             bus0=f"gas {region}",
             bus1=f"bus {region}",
-            carrier="gas",
-            efficiency=0.55,
+            carrier="ccgt",
+            efficiency=gas_efficiency,
             p_nom=0,
             p_nom_extendable=True,
             capital_cost=annualized_cost("gas"),
-            marginal_cost=marginal_cost["gas"],
+            marginal_cost=0.0,
         )
 
     # Battery storage
@@ -163,6 +206,7 @@ co2_intensity_t_per_mwh_th = {
     "battery": 0.0,
     "H2": 0.0,
     "gas": 0.19,
+    "ccgt": 0.0,
     "AC": 0.0,
 }
 
@@ -184,7 +228,7 @@ def _ensure_gas_supply(net: pypsa.Network) -> None:
                 carrier="gas",
                 p_nom_extendable=True,
                 p_nom=0.0,
-                marginal_cost=0.0,
+                marginal_cost=gas_efficiency * marginal_cost["gas"],
                 capital_cost=0.0,
             )
 
