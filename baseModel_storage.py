@@ -619,6 +619,24 @@ _plot_partc_week_separate_files(
     title_h2_storage="Winter period (Jul-Sep 2024, Brazil) - H2 storage energy level",
 )
 
+# Full-year H2 storage energy level
+if "H2 storage" in n_st.stores.index:
+    e_h2_year = n_st.stores_t.e.loc[slice("2024-01-01", "2024-12-31 23:00"), "H2 storage"]
+    fig, ax = plt.subplots(figsize=(18, 6))
+    ax.plot(e_h2_year.index, e_h2_year.values, color="olive", linewidth=1.2)
+    _apply_partc_fonts(
+        ax,
+        title="Hydrogen storage energy level - full year 2024",
+        xlabel="Time",
+        ylabel="Stored energy [MWh]",
+        title_fs=_PARTC_H2_TITLE_FS,
+        label_fs=_PARTC_H2_LABEL_FS,
+        tick_fs=_PARTC_H2_TICK_FS,
+    )
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    _savefig_close_partc(fig, "figures/partC_h2_storage_energy_full_year.png")
+
 # Annual mix: two separate pie charts (not side-by-side in one image)
 mix_base = n.generators_t.p.sum()
 mix_st = n_st.generators_t.p.sum()
