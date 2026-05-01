@@ -124,17 +124,17 @@ for n0, n1 in gas_pipelines:
 
 # Commodity gas supply at each regional gas bus.
 # This is the source that can feed local boilers and inter-regional gas flows.
-for region in regions:
-    network.add(
-        "Generator",
-        f"{region} gas supply",
-        bus=f"gas {region}",
-        carrier="gas",
-        p_nom_extendable=True,
-        p_nom=0,
-        capital_cost=0.0,
-        marginal_cost=marginal_cost["gas"],
-    )
+
+network.add(
+    "Generator",
+    "BRA-SE gas supply",
+    bus="gas BRA-SE",
+    carrier="gas",
+    p_nom_extendable=True,
+    p_nom=0,
+    capital_cost=0.0,
+    marginal_cost=marginal_cost["gas"],
+)
 
 # Addition of CCGT plants (gas -> electricity)
 for region in regions:
@@ -450,6 +450,113 @@ if heat_balance_error > 1e-3:
 if gas_balance_error > 1e-3:
     print("[WARN] Non-zero gas balance error; inspect gas network/link dispatch.")
 
+# %% Consolidated results tables
+def _as_scalar(x):
+    """Return scalar float for PyPSA statistics that may be Series/DataFrame."""
+    if np.isscalar(x):
+        return float(x)
+    if isinstance(x, pd.DataFrame):
+        return float(x.to_numpy().sum())
+    if isinstance(x, pd.Series):
+        return float(x.sum())
+    # Fallback for array-like objects
+    return float(np.asarray(x).sum())
+
+ac_buses = network.buses.index[network.buses.carrier == "AC"]
+heat_buses = network.buses.index[network.buses.carrier == "heat"]
+
+avg_el_price = float(network.buses_t.marginal_price.reindex(columns=ac_buses, fill_value=np.nan).mean().mean())
+avg_heat_price = float(network.buses_t.marginal_price.reindex(columns=heat_buses, fill_value=np.nan).mean().mean())
+
+gas_pipeline_cols = network.links.index[network.links.index.str.contains("gas pipeline")]
+elec_line_abs_flow_mwh = float(network.lines_t.p0.abs().sum().sum())
+gas_pipeline_abs_flow_mwh = float(network.links_t.p0.reindex(columns=gas_pipeline_cols, fill_value=0.0).abs().sum().sum())
+
+summary_table = pd.DataFrame(
+    {
+        "metric": [
+            "objective_$",
+            "total_system_cost_$",
+            "total_capex_$",
+            "total_opex_$",
+            "avg_electricity_price_$_per_MWh",
+            "avg_heat_price_$_per_MWh",
+            "co2_emissions_t",
+            "co2_cap_t",
+            "co2_shadow_price_$_per_t",
+            "electricity_demand_TWh",
+            "heat_demand_TWh",
+            "heat_supply_heat_pump_TWh",
+            "heat_supply_gas_boiler_TWh",
+            "gas_supply_TWh",
+            "gas_to_ccgt_TWh",
+            "gas_to_boilers_TWh",
+            "ccgt_generation_TWh",
+            "ccgt_implied_efficiency",
+            "electric_line_abs_flow_TWh",
+            "gas_pipeline_abs_flow_TWh",
+        ],
+        "value": [
+            float(network.objective),
+            _as_scalar(network.statistics.system_cost()),
+            _as_scalar(network.statistics.capex()),
+            _as_scalar(network.statistics.opex()),
+            avg_el_price,
+            avg_heat_price,
+            co2_emissions_t,
+            co2_limit,
+            co2_price,
+            elec_demand_mwh / 1e6,
+            heat_demand_mwh / 1e6,
+            heat_supply_hp_mwh / 1e6,
+            heat_supply_gb_mwh / 1e6,
+            gas_supply_mwh / 1e6,
+            gas_to_ccgt_mwh / 1e6,
+            gas_to_boilers_mwh / 1e6,
+            ccgt_el_mwh / 1e6,
+            ccgt_implied_efficiency,
+            elec_line_abs_flow_mwh / 1e6,
+            gas_pipeline_abs_flow_mwh / 1e6,
+        ],
+    }
+)
+print("\n=== Summary metrics ===")
+print(summary_table.to_string(index=False, float_format=lambda x: f"{x:,.4f}"))
+
+# Installed capacities by technology group
+gen_cap_mw = network.generators.groupby("carrier")["p_nom_opt"].sum().sort_values(ascending=False)
+link_cap_mw = network.links.groupby("carrier")["p_nom_opt"].sum().sort_values(ascending=False)
+store_cap_mw = network.storage_units.groupby("carrier")["p_nom_opt"].sum().sort_values(ascending=False)
+
+capacity_table = pd.concat(
+    [
+        gen_cap_mw.rename("Generators_MW"),
+        link_cap_mw.rename("Links_MW"),
+        store_cap_mw.rename("StorageUnits_MW"),
+    ],
+    axis=1,
+).fillna(0.0)
+print("\n=== Installed capacity by carrier [MW] ===")
+print(capacity_table.to_string(float_format=lambda x: f"{x:,.2f}"))
+
+# Dispatch / throughput by technology carrier
+gen_dispatch_twh = (network.generators_t.p.sum(axis=0).groupby(network.generators.carrier).sum() / 1e6).sort_values(ascending=False)
+link_output_twh = (((-network.links_t.p1).clip(lower=0.0).sum(axis=0)).groupby(network.links.carrier).sum() / 1e6).sort_values(ascending=False)
+store_discharge_twh = (
+    network.storage_units_t.p.clip(lower=0.0).sum(axis=0).groupby(network.storage_units.carrier).sum() / 1e6
+).sort_values(ascending=False)
+
+dispatch_table = pd.concat(
+    [
+        gen_dispatch_twh.rename("Generators_dispatch_TWh"),
+        link_output_twh.rename("Links_output_TWh"),
+        store_discharge_twh.rename("Storage_discharge_TWh"),
+    ],
+    axis=1,
+).fillna(0.0)
+print("\n=== Dispatched / delivered energy by carrier [TWh] ===")
+print(dispatch_table.to_string(float_format=lambda x: f"{x:,.4f}"))
+
 # %%
 network.generators.p_nom_opt # Optimal capacities of the generators
 # %%
@@ -495,6 +602,35 @@ else:
         textprops={"fontsize": 11},
     )
     ax.set_title("Yearly heating supply mix")
+    ax.axis("equal")
+    plt.tight_layout()
+    plt.show()
+
+# %% Yearly electricity supply mix (generation + CCGT)
+gen_by_carrier_total = network.generators_t.p.groupby(network.generators.carrier, axis=1).sum().sum(axis=0)
+ccgt_links = network.links.index[network.links.index.str.contains("gas plant")]
+ccgt_supply_total = (-network.links_t.p1.reindex(columns=ccgt_links, fill_value=0.0)).sum().sum()
+
+elec_mix_twh = pd.Series(dtype=float)
+for carrier in ["hydro", "wind", "solar", "biomass", "nuclear"]:
+    elec_mix_twh.loc[carrier] = float(gen_by_carrier_total.get(carrier, 0.0)) / 1_000_000
+elec_mix_twh.loc["ccgt"] = float(ccgt_supply_total) / 1_000_000
+elec_mix_twh = elec_mix_twh[elec_mix_twh > 0]
+
+if elec_mix_twh.empty:
+    print("[INFO] Electricity mix pie chart skipped: no positive electricity supply found.")
+else:
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.pie(
+        elec_mix_twh.values,
+        labels=elec_mix_twh.index,
+        colors=["blue", "lightskyblue", "yellow", "green", "purple", "red"][:len(elec_mix_twh)],
+        autopct="%1.1f%%",
+        startangle=90,
+        pctdistance=0.65,
+        textprops={"fontsize": 11},
+    )
+    ax.set_title("Yearly electricity supply mix")
     ax.axis("equal")
     plt.tight_layout()
     plt.show()
@@ -599,6 +735,21 @@ carrier_colors = {
 }
 bus_colors = network.buses.carrier.map(carrier_colors).fillna("slateblue")
 
+# Mean absolute flow per component [MW] for visual scaling on the map.
+line_flow_mean = network.lines_t.p0.abs().mean(axis=0).reindex(network.lines.index).fillna(0.0)
+link_flow_mean = network.links_t.p0.abs().mean(axis=0).reindex(network.links.index).fillna(0.0)
+
+def _scaled_widths(flow_series, min_width=0.5, max_width=4.0):
+    if flow_series.empty:
+        return flow_series
+    fmax = flow_series.max()
+    if fmax <= 0:
+        return pd.Series(min_width, index=flow_series.index)
+    return min_width + (max_width - min_width) * (flow_series / fmax)
+
+line_widths = _scaled_widths(line_flow_mean, min_width=0.8, max_width=5.0)
+link_widths = _scaled_widths(link_flow_mean, min_width=0.5, max_width=3.5)
+
 fig, ax = plt.subplots(figsize=(11, 10), subplot_kw={"projection": ccrs.PlateCarree()})
 ax.set_extent([-75, -30, -35, 7], crs=ccrs.PlateCarree())
 ax.add_feature(cfeature.LAND, facecolor="whitesmoke")
@@ -612,10 +763,10 @@ network.plot(
     bus_sizes=0.05,
     bus_colors=bus_colors,
     line_colors="steelblue",
-    line_widths=2.5,
+    line_widths=line_widths,
     link_colors="darkorange",
-    link_widths=1.8,
-    title="Integrated electricity-gas-heat network",
+    link_widths=link_widths,
+    title="Integrated electricity-gas-heat network (flow-scaled widths)",
 )
 plt.tight_layout()
 plt.show()
@@ -674,3 +825,5 @@ system_overview = (
 )
 print("\n=== System overview by bus ===")
 print(system_overview.to_string(index=False))
+
+# %%
