@@ -1,4 +1,6 @@
 #%%
+from tkinter import SE
+
 import pandas as pd
 #pd.options.mode.string_storage = "python"
 import numpy as np
@@ -67,8 +69,9 @@ region_bus_coords = {
     "BRA-S": (-51.2, -30.0),
 }
 
-############################### Addition of gas pipelines ##########################
+#%%############################## Addition of gas pipelines ##########################
 c_CH4, rho_CH4, capacity_CH4 = methane_capacity()
+
 for region in regions:
     network.add(
         "Bus",
@@ -77,6 +80,7 @@ for region in regions:
         x=region_bus_coords[region][0] - 1.2,
         y=region_bus_coords[region][1] - 1.2,
     )
+
 # Adding the network pipelines
 gas_pipelines = [
     ("BRA-N", "BRA-NE"),
@@ -96,8 +100,7 @@ for n0, n1 in gas_pipelines:
         f"gas pipeline {n0}->{n1}",
         bus0=f"gas {n0}",
         bus1=f"gas {n1}",
-        p_nom=0,
-        p_nom_extendable=True,
+        p_nom=capacity_CH4,
         carrier="gas",
         efficiency=gas_pipeline_efficiency,
         capital_cost=gas_pipeline_capital_cost,
@@ -125,9 +128,8 @@ network.add(
     p_nom=0,
     p_nom_extendable=True,
     capital_cost=0.0,
-    marginal_cost=gas_efficiency * marginal_cost["gas"], # Marginal cost (from parameters.py) is per MWh of electricity, so we multiply by 0.5 to get the marginal cost of the gas supply
+    marginal_cost=gas_efficiency * marginal_cost["gas"],
 )
-
 #%% Adding generators (parameters imported from parameters.py)
 
 
@@ -496,4 +498,191 @@ for line_name in network.lines.index:
 
 plt.tight_layout()
 plt.show()
+
+#%%
+import pandas as pd
+
+# =========================
+# SETTINGS
+# =========================
+
+region = "BRA-SE"
+bus = f"bus {region}"
+gas_bus = f"gas {region}"
+
+techs = ["hydro", "biomass", "nuclear", "wind", "solar"]
+
+gen_cap = {}
+gen_disp = {}
+
+# =========================
+# 1. GENERATION (AC BUS)
+# =========================
+
+for tech in techs:
+
+    gens = network.generators.index[
+        (network.generators.carrier == tech) &
+        (network.generators.bus == bus)
+    ]
+
+    if len(gens) > 0:
+        gen_cap[tech] = network.generators.p_nom_opt[gens].sum()
+        gen_disp[tech] = network.generators_t.p[gens].loc[:, gens].sum().sum()
+    else:
+        gen_cap[tech] = 0.0
+        gen_disp[tech] = 0.0
+
+
+# =========================
+# 2. CCGT (electricity output)
+# =========================
+
+ccgt_links = network.links.index[
+    (network.links.carrier == "ccgt") &
+    (network.links.bus1 == bus)
+]
+
+gen_cap["ccgt"] = network.links.p_nom_opt[ccgt_links].sum()
+gen_disp["ccgt"] = (-network.links_t.p1[ccgt_links]).sum().sum()
+
+
+# =========================
+# 3. TOTAL GENERATION (100%)
+# =========================
+
+gen_cap_total = sum(gen_cap.values())
+gen_disp_total = sum(gen_disp.values())
+
+gen_cap_share = {
+    k: 100 * gen_cap[k] / gen_cap_total if gen_cap_total > 0 else 0
+    for k in gen_cap
+}
+
+gen_disp_share = {
+    k: 100 * gen_disp[k] / gen_disp_total if gen_disp_total > 0 else 0
+    for k in gen_disp
+}
+
+
+# =========================
+# 4. BATTERY (SEPARATE)
+# =========================
+
+battery_units = network.storage_units.index[
+    network.storage_units.bus == bus
+]
+
+battery_capacity = network.storage_units.p_nom_opt[battery_units].sum()
+
+battery_dispatch = network.storage_units_t.p_dispatch[battery_units].sum().sum()
+battery_charge = network.storage_units_t.p_store[battery_units].sum().sum()
+
+battery_net = battery_dispatch - battery_charge
+
+
+# =========================
+# 5. NET ELECTRICITY TRANSFER (CORRECT SIGNED FLOW)
+# =========================
+
+net_elec = 0.0
+
+for line in network.lines.index:
+
+    flow = network.lines_t.p0[line]
+    bus0 = network.lines.loc[line, "bus0"]
+    bus1 = network.lines.loc[line, "bus1"]
+
+    # INTO BRA-SE
+    if bus1 == bus:
+        net_elec += flow.sum()
+
+    # OUT OF BRA-SE
+    if bus0 == bus:
+        net_elec -= flow.sum()
+
+
+# =========================
+# 6. NET GAS TRANSFER (CORRECT SIGNED FLOW)
+# =========================
+
+net_gas = 0.0
+
+gas_links = network.links.index[
+    network.links.index.str.contains("gas pipeline")
+]
+
+for link in gas_links:
+
+    flow = network.links_t.p0[link]
+    bus0 = network.links.loc[link, "bus0"]
+    bus1 = network.links.loc[link, "bus1"]
+
+    # INTO gas system of BRA-SE
+    if bus1 == gas_bus:
+        net_gas += flow.sum()
+
+    # OUT of gas system of BRA-SE
+    if bus0 == gas_bus:
+        net_gas -= flow.sum()
+
+
+# =========================
+# 7. PERCENTAGES
+# =========================
+
+battery_capacity_share = 100 * battery_capacity / gen_cap_total if gen_cap_total > 0 else 0
+battery_dispatch_share = 100 * battery_net / gen_disp_total if gen_disp_total > 0 else 0
+
+net_elec_share = 100 * net_elec / gen_disp_total if gen_disp_total > 0 else 0
+net_gas_share = 100 * net_gas / gen_disp_total if gen_disp_total > 0 else 0
+
+
+# =========================
+# 8. FINAL TABLE (GENERATION = 100%)
+# =========================
+
+table = pd.DataFrame({
+    "Technology": list(gen_disp_share.keys()),
+    "Capacity (%)": [gen_cap_share[k] for k in gen_disp_share.keys()],
+    "Dispatch (%)": [gen_disp_share[k] for k in gen_disp_share.keys()]
+})
+
+print("\n=== GENERATION MIX (100% BASE) ===\n")
+print(table)
+
+
+# =========================
+# 9. SYSTEM COMPONENTS
+# =========================
+
+print("\n=== SYSTEM COMPONENTS (NET FLOWS) ===\n")
+
+print(f"Battery capacity (MW): {battery_capacity:.2f}")
+print(f"Battery capacity share: {battery_capacity_share:.2f}%")
+
+print(f"Battery net dispatch (MWh): {battery_net:.2f}")
+print(f"Battery dispatch share: {battery_dispatch_share:.2f}%")
+
+print(f"Net electricity flow (MWh): {net_elec:.2f}")
+print(f"Net electricity share: {net_elec_share:.2f}%")
+
+print(f"Net gas flow (MWh): {net_gas:.2f}")
+print(f"Net gas share: {net_gas_share:.2f}%")
+#%%
+(network.lines_t.p0.mean()/1100*100).round(2)
+# %%
+(network.links_t.p0.mean()/1100*100).round(2)
+
+# %%
+#%%
+print((network.lines_t.p0.mean()).round(2))
+
+print((network.links_t.p0.mean()).round(2))
+# %%
+network.lines_t.p0.abs().sum()
+# %%
+network.links_t.p0.abs().sum()
+# %%
+print(22.96/(network.generators_t.p.sum().sum()/10**6))
 # %%
