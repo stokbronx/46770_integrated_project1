@@ -16,6 +16,7 @@ importlib.reload(parameters)
 from parameters import (
     capital_cost, opex_cost, marginal_cost, lifetime,
     max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE, methane_capacity,
+    gas_efficiency,
 )
 #%% Adding the buses to the network
 network = pypsa.Network()
@@ -133,6 +134,25 @@ for region in regions:
         p_nom=0,
         capital_cost=0.0,
         marginal_cost=marginal_cost["gas"],
+    )
+
+# Addition of CCGT plants (gas -> electricity)
+for region in regions:
+
+    network.add(
+        "Link",
+        f"{region} gas plant",
+        bus0=f"gas {region}",
+        bus1=f"bus {region}",
+        carrier="ccgt",
+
+        efficiency=gas_efficiency,
+
+        p_nom=0,
+        p_nom_extendable=True,
+
+        capital_cost=annualized_cost("gas"),
+        marginal_cost=0
     )
 
 
@@ -389,6 +409,8 @@ heat_supply_gb_mwh = float((-network.links_t.p1.reindex(columns=gas_boiler_cols,
 gas_supply_mwh = float(network.generators_t.p.reindex(columns=gas_supply_cols, fill_value=0.0).sum().sum())
 gas_to_boilers_mwh = float(network.links_t.p0.reindex(columns=gas_boiler_cols, fill_value=0.0).sum().sum())
 gas_to_ccgt_mwh = float(network.links_t.p0.reindex(columns=ccgt_cols, fill_value=0.0).sum().sum())
+ccgt_el_mwh = float((-network.links_t.p1.reindex(columns=ccgt_cols, fill_value=0.0)).sum().sum())
+ccgt_implied_efficiency = (ccgt_el_mwh / gas_to_ccgt_mwh) if gas_to_ccgt_mwh > 0 else np.nan
 
 print("\nAnnual system statistics:")
 print(pd.Series({
@@ -399,6 +421,8 @@ print(pd.Series({
     "gas_supply_TWh": gas_supply_mwh / 1e6,
     "gas_to_boilers_TWh": gas_to_boilers_mwh / 1e6,
     "gas_to_ccgt_TWh": gas_to_ccgt_mwh / 1e6,
+    "ccgt_generation_TWh": ccgt_el_mwh / 1e6,
+    "ccgt_implied_efficiency": ccgt_implied_efficiency,
 }).round(3))
 
 print("\nKey optimal capacities [MW]:")
@@ -417,6 +441,10 @@ print("\nConsistency checks:")
 print(f"Heat balance error [MWh]: {heat_balance_error:,.2f}")
 print(f"Gas balance error [MWh]: {gas_balance_error:,.2f}")
 print(f"CO2 cap slack [tCO2]: {cap_slack:,.2f}")
+if gas_to_ccgt_mwh > 0:
+    print(f"CCGT implied efficiency [-]: {ccgt_implied_efficiency:.4f} (parameter: {gas_efficiency:.4f})")
+else:
+    print("CCGT implied efficiency [-]: n/a (no CCGT dispatch)")
 if heat_balance_error > 1e-3:
     print("[WARN] Non-zero heat balance error; inspect heat links/signs.")
 if gas_balance_error > 1e-3:
@@ -431,11 +459,11 @@ network.generators_t.p # Optimal dispatch of the generators over time
 
 # %%
 
-gas_plants = network.links[
+gas_boilers = network.links[
     network.links.index.str.contains("local gas boiler")
 ]
 
-print(gas_plants[["bus0", "bus1", "p_nom_opt"]])
+print(gas_boilers[["bus0", "bus1", "p_nom_opt"]])
 
 # %% Yearly heating supply mix (heat pump vs gas boiler)
 heat_pump_links = network.links.index[network.links.index.str.contains("heat pump")]
