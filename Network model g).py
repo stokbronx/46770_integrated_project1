@@ -117,17 +117,16 @@ for n0, n1 in gas_pipelines:
     )
 
 # Gas commodity supply at each regional gas bus
-for region in regions:
-    network.add(
-        "Generator",
-        f"{region} gas supply",
-        bus=f"gas {region}",
-        carrier="gas",
-        p_nom=0,
-        p_nom_extendable=True,
-        capital_cost=0.0,
-        marginal_cost=gas_efficiency * marginal_cost["gas"], # Marginal cost (from parameters.py) is per MWh of electricity, so we multiply by 0.5 to get the marginal cost of the gas supply
-    )
+network.add(
+    "Generator",
+    "BRA-SE gas supply",
+    bus="gas BRA-SE",
+    carrier="gas",
+    p_nom=0,
+    p_nom_extendable=True,
+    capital_cost=0.0,
+    marginal_cost=gas_efficiency * marginal_cost["gas"], # Marginal cost (from parameters.py) is per MWh of electricity, so we multiply by 0.5 to get the marginal cost of the gas supply
+)
 
 #%% Adding generators (parameters imported from parameters.py)
 
