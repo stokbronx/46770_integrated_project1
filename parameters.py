@@ -10,7 +10,7 @@ capital_cost = dict(  # in $/MW
     # Based on literature value 4422.2 EUR per unit (20-year life) and
     # assuming ~20 kW_th unit size -> ~221 EUR/kW_th = 221,000 EUR/MW_th.
     # Converted at ~1.08 USD/EUR -> ~239,000 USD/MW_th.
-    gas_boiler_local=239000,
+    gas_boiler_local=297000,
 )
 
 opex_cost = dict(  # in $/MW/year (fixed O&M)
