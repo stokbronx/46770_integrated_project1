@@ -15,7 +15,7 @@ import parameters
 importlib.reload(parameters)
 from parameters import (
     capital_cost, opex_cost, marginal_cost, lifetime,
-    max_capacity_hydro, annuity, annualized_cost, DISCOUNT_RATE, methane_capacity,
+    max_capacity_hydro,max_capacity_biomass, annuity, annualized_cost, DISCOUNT_RATE, methane_capacity,
 )
 #%% Adding the buses to the network
 network = pypsa.Network()
@@ -123,11 +123,11 @@ for n0, n1 in gas_pipelines:
 
 # Commodity gas supply at each regional gas bus.
 # This is the source that can feed local boilers and inter-regional gas flows.
-for region in regions:
-    network.add(
+
+network.add(
         "Generator",
-        f"{region} gas supply",
-        bus=f"gas {region}",
+        f"{"BRA-SE"} gas supply",
+        bus=f"gas {"BRA-SE"}",
         carrier="gas",
         p_nom_extendable=True,
         p_nom=0,
@@ -153,8 +153,25 @@ for region in regions:
 
 
 #%% Adding generators (parameters imported from parameters.py)
+gas_efficiency=0.55
+# Addition of CCGT plants (gas -> electricity)
+for region in regions:
 
+    network.add(
+        "Link",
+        f"{region} gas plant",
+        bus0=f"gas {region}",
+        bus1=f"bus {region}",
+        carrier="ccgt",
 
+        efficiency=gas_efficiency,
+
+        p_nom=0,
+        p_nom_extendable=True,
+
+        capital_cost=annualized_cost("gas"),
+        marginal_cost=0
+    )
 # ============================
 # 🔋 BATTERY PARAMETERS (UPDATED)
 # ============================
@@ -218,7 +235,12 @@ hydro_cap = {
     "BRA-SE": max_capacity_hydro,
     "BRA-S": max_capacity_hydro,
 }
-
+biomass_cap = {
+    "BRA-N": max_capacity_biomass,
+    "BRA-NE": max_capacity_biomass,
+    "BRA-SE": max_capacity_biomass,
+    "BRA-S": max_capacity_biomass,
+}
 
 # ============================
 # GENERATORS (UNCHANGED)
@@ -237,6 +259,7 @@ for region in regions:
             p_max_pu = None
 
         p_nom_max = hydro_cap[region] if tech == "hydro" else None
+        p_nom_max = biomass_cap[region] if tech == "biomass" else p_nom_max
 
         network.add(
             "Generator",
@@ -646,3 +669,196 @@ system_overview = (
 )
 print("\n=== System overview by bus ===")
 print(system_overview.to_string(index=False))
+
+
+
+#%%############################ System overview table ####################################
+
+import pandas as pd
+
+# =========================
+# SETTINGS
+# =========================
+
+region = "BRA-SE"
+
+bus = f"bus {region}"
+gas_bus = f"gas {region}"
+heat_bus = f"heating {region}"
+
+techs = ["hydro", "biomass", "nuclear", "wind", "solar"]
+
+gen_cap = {}
+gen_disp = {}
+
+# =========================
+# 1. GENERATION (AC BUS)
+# =========================
+
+for tech in techs:
+
+    gens = network.generators.index[
+        (network.generators.carrier == tech) &
+        (network.generators.bus == bus)
+    ]
+
+    if len(gens) > 0:
+        gen_cap[tech] = network.generators.p_nom_opt[gens].sum()
+
+        # FIX: remove duplicate column selection
+        gen_disp[tech] = network.generators_t.p[gens].sum().sum()
+    else:
+        gen_cap[tech] = 0.0
+        gen_disp[tech] = 0.0
+
+
+# =========================
+# 2. CCGT (gas -> electricity)
+# =========================
+
+ccgt_links = network.links.index[
+    (network.links.carrier == "ccgt") &
+    (network.links.bus1 == bus)
+]
+
+gen_cap["ccgt"] = network.links.p_nom_opt[ccgt_links].sum()
+
+# electricity output is p1 (negative sign)
+gen_disp["ccgt"] = (-network.links_t.p1[ccgt_links]).sum().sum()
+
+
+# =========================
+# 3. TOTAL GENERATION
+# =========================
+
+gen_cap_total = sum(gen_cap.values())
+gen_disp_total = sum(gen_disp.values())
+
+gen_cap_share = {
+    k: 100 * gen_cap[k] / gen_cap_total if gen_cap_total > 0 else 0
+    for k in gen_cap
+}
+
+gen_disp_share = {
+    k: 100 * gen_disp[k] / gen_disp_total if gen_disp_total > 0 else 0
+    for k in gen_disp
+}
+
+
+# =========================
+# 4. BATTERY
+# =========================
+
+battery_units = network.storage_units.index[
+    (network.storage_units.bus == bus) &
+    (network.storage_units.carrier == "battery")
+]
+
+battery_capacity = network.storage_units.p_nom_opt[battery_units].sum()
+
+battery_dispatch = network.storage_units_t.p_dispatch[battery_units].sum().sum()
+battery_charge = network.storage_units_t.p_store[battery_units].sum().sum()
+
+battery_net = battery_dispatch - battery_charge
+
+
+# =========================
+# 5. NET ELECTRICITY TRANSFER
+# =========================
+
+net_elec = 0.0
+
+for line in network.lines.index:
+
+    flow = network.lines_t.p0[line]
+    bus0 = network.lines.loc[line, "bus0"]
+    bus1 = network.lines.loc[line, "bus1"]
+
+    if bus1 == bus:
+        net_elec += flow.sum()
+
+    if bus0 == bus:
+        net_elec -= flow.sum()
+
+
+# =========================
+# 6. NET GAS TRANSFER
+# =========================
+
+net_gas = 0.0
+
+gas_links = network.links.index[
+    network.links.index.str.contains("gas pipeline")
+]
+
+for link in gas_links:
+
+    flow = network.links_t.p0[link]
+    bus0 = network.links.loc[link, "bus0"]
+    bus1 = network.links.loc[link, "bus1"]
+
+    if bus1 == gas_bus:
+        net_gas += flow.sum()
+
+    if bus0 == gas_bus:
+        net_gas -= flow.sum()
+
+
+# =========================
+# 7. HEAT GENERATION (NEW)
+# =========================
+
+heat_links = network.links.index[
+    network.links.bus1 == heat_bus
+]
+
+heat_dispatch = network.links_t.p1[heat_links].sum().sum()
+
+
+# =========================
+# 8. SHARES
+# =========================
+
+battery_capacity_share = 100 * battery_capacity / gen_cap_total if gen_cap_total > 0 else 0
+battery_dispatch_share = 100 * battery_net / gen_disp_total if gen_disp_total > 0 else 0
+
+net_elec_share = 100 * net_elec / gen_disp_total if gen_disp_total > 0 else 0
+net_gas_share = 100 * net_gas / gen_disp_total if gen_disp_total > 0 else 0
+
+
+# =========================
+# 9. GENERATION TABLE
+# =========================
+
+table = pd.DataFrame({
+    "Technology": list(gen_disp_share.keys()),
+    "Capacity (%)": [gen_cap_share[k] for k in gen_disp_share.keys()],
+    "Dispatch (%)": [gen_disp_share[k] for k in gen_disp_share.keys()]
+})
+
+print("\n=== GENERATION MIX (100% BASE) ===\n")
+print(table)
+
+
+# =========================
+# 10. SYSTEM COMPONENTS
+# =========================
+
+print("\n=== SYSTEM COMPONENTS ===\n")
+
+print(f"Battery capacity (MW): {battery_capacity:.2f}")
+print(f"Battery capacity share: {battery_capacity_share:.2f}%")
+
+print(f"Battery net dispatch (MWh): {battery_net:.2f}")
+print(f"Battery dispatch share: {battery_dispatch_share:.2f}%")
+
+print(f"Net electricity flow (MWh): {net_elec:.2f}")
+print(f"Net electricity share: {net_elec_share:.2f}%")
+
+print(f"Net gas flow (MWh): {net_gas:.2f}")
+print(f"Net gas share: {net_gas_share:.2f}%")
+
+print(f"Total heat supplied (MWh): {heat_dispatch:.2f}")
+# %%
+network.links_t.p0.abs().sum()
+# %%
