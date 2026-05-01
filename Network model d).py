@@ -130,6 +130,8 @@ for region in regions:
         )
 
 
+
+
 # ============================
 # 🔋 BATTERY (STORE + LINK STYLE via StorageUnit)
 # ============================
