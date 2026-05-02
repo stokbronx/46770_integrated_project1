@@ -96,7 +96,7 @@ print("Capacity:", capacity_gas)
 DISCOUNT_RATE = 0.07
 
 max_capacity_hydro = 40000 # in MW
-max_capacity_biomass= 10**10 # in MW
+max_capacity_biomass= 33700000000000000# in MW
 
 def annuity(n, r):
     """Calculate the annuity factor for an asset with lifetime n years and

@@ -5,26 +5,33 @@ DTU Course 46770, Spring 2026.
 
 ## Project overview
 
-The project progressively builds up a model of the Brazilian electricity system:
+The project progressively builds up a model of the Brazilian energy system:
 
 | Task | Description | Script |
 |------|-------------|--------|
 | **a) Single-node model** | Capacity expansion and dispatch optimization for the SE region (hydro, biomass, nuclear, wind, solar). Includes weekly dispatch, electricity mix, and duration curves. | `baseModel_singlenode.py` |
 | **b) Sensitivity analysis** | Reruns the single-node optimization across 20 weather years (2005–2024) to quantify how inter-annual variability in solar/wind resources affects optimal capacities and generation. | `sensitivity_analysis.py` |
-| **c) Storage** | Extends the single-node model with battery and hydrogen storage (electrolyzer → H₂ store → fuel cell) to analyse balancing strategies across intraday and seasonal timescales. | `baseModel_storage.py` |
-| **d) Multi-node network** | Four-bus model (N, NE, SE, S) connected by HVAC lines with DC load-flow approximation. Optimises generation and transmission jointly; results verified analytically via incidence and PTDF matrices. | `Network model d).py` |
-| **e) PTDF verification** | Hand calculation (pen & paper) of incidence and PTDF matrices to replicate the first-timestep power flows from task d). | — |
+| **c) Storage** | Extends the single-node model with battery and hydrogen storage (electrolyzer -> H2 store -> fuel cell) to analyse balancing strategies across intraday and seasonal timescales. | `baseModel_storage.py` |
+| **d) Multi-node network** | Four-bus model (N, NE, SE, S) connected by HVAC lines with DC load-flow approximation. Optimises generation and transmission jointly. | `Network model d).py` |
+| **g) Network extensions** | Additional constrained/scenario-based network formulation used for report comparisons. | `Network model g).py` |
+| **h) Decarbonization case** | Scenario with stronger emissions/decarbonization constraints. | `Decarbonization H).py` |
+| **i) Coupled electricity-heating model** | Integrated model including heating demand and heating-sector technologies (e.g. heat pump / gas boiler links). Produces generation-mix and system-cost tables for model i baseline and scenario deltas. | `Network model with heating i).py` |
 
 ## Repository structure
 
 ```
 .
-├── datapreparation.py          # Shared data layer: demand, wind/solar CFs
-├── baseModel_singlenode.py     # Task a – single-node capacity optimisation
-├── baseModel_storage.py        # Task c – storage extension
-├── sensitivity_analysis.py     # Task b – 20-year weather sensitivity
-├── Network model d).py         # Task d – multi-node network model
-├── plotting.py                 # Quick CF exploration plots
+├── datapreparation.py               # Shared data layer: demand, wind/solar CFs
+├── parameters.py                    # Shared technology and scenario parameters
+├── baseModel_singlenode.py          # Task a – single-node capacity optimisation
+├── baseModel_storage.py             # Task c – storage extension
+├── baseModel_storage_CO2.py         # Storage model with CO2 constraint variant
+├── sensitivity_analysis.py          # Task b – 20-year weather sensitivity
+├── Network model d).py              # Task d – multi-node network model
+├── Network model g).py              # Task g – extended network scenario model
+├── Decarbonization H).py            # Task h – decarbonization scenario
+├── Network model with heating i).py # Task i – coupled electricity-heating model
+├── plotting.py                      # Quick CF exploration plots
 ├── Data/
 │   ├── demand_brazil.csv
 │   └── renewablesNinjaData/
@@ -58,9 +65,18 @@ python baseModel_singlenode.py
 python sensitivity_analysis.py
 python baseModel_storage.py
 python "Network model d).py"
+python "Network model g).py"
+python "Decarbonization H).py"
+python "Network model with heating i).py"
 ```
 
 > **Note:** `datapreparation.py` is imported by the other scripts — it does not need to be run separately.
+
+## Reporting notes (current)
+
+- **Model i baseline tables:** The report tables for model i should use values printed by `Network model with heating i).py` (generation mix, battery size, battery/system cost).
+- **Arrow deltas:** Up/down arrows in scenario tables are reported as **scenario value minus model i value** (percentage points for shares; absolute units for GW/TWh/cost rows).
+- **Battery dispatch sign:** A negative net battery dispatch means the battery is a net consumer over the horizon (charging exceeds discharging).
 
 ## Data sources
 

@@ -102,8 +102,8 @@ for n0, n1 in gas_pipelines:
         f"gas pipeline {n0}->{n1}",
         bus0=f"gas {n0}",
         bus1=f"gas {n1}",
-        p_nom=0,
-        p_nom_extendable=True,
+        p_nom=capacity_CH4,
+        p_nom_extendable=False,
         carrier="gas",
         efficiency=gas_pipeline_efficiency,
         capital_cost=gas_pipeline_capital_cost,
@@ -114,8 +114,8 @@ for n0, n1 in gas_pipelines:
         f"gas pipeline {n1}->{n0}",
         bus0=f"gas {n1}",
         bus1=f"gas {n0}",
-        p_nom=0,
-        p_nom_extendable=True,
+        p_nom=capacity_CH4,
+        p_nom_extendable=False,
         carrier="gas",
         efficiency=gas_pipeline_efficiency,
         capital_cost=gas_pipeline_capital_cost,
@@ -150,6 +150,7 @@ for region in regions:
 
         p_nom=0,
         p_nom_extendable=True,
+        p_min_pu=0.0,
 
         capital_cost=annualized_cost("gas"),
         marginal_cost=0
@@ -173,25 +174,6 @@ for region in regions:
 
 
 #%% Adding generators (parameters imported from parameters.py)
-gas_efficiency=0.55
-# Addition of CCGT plants (gas -> electricity)
-for region in regions:
-
-    network.add(
-        "Link",
-        f"{region} gas plant",
-        bus0=f"gas {region}",
-        bus1=f"bus {region}",
-        carrier="ccgt",
-
-        efficiency=gas_efficiency,
-
-        p_nom=0,
-        p_nom_extendable=True,
-
-        capital_cost=annualized_cost("gas"),
-        marginal_cost=0
-    )
 # ============================
 # 🔋 BATTERY PARAMETERS (UPDATED)
 # ============================
@@ -240,6 +222,7 @@ for region in regions:
         efficiency=cop_per_region[region].mean(),  # placeholder; overwritten below
         p_nom=0,
         p_nom_extendable=True,
+        p_min_pu=0.0,
         capital_cost=annualized_cost("heat_pump"),
         marginal_cost=marginal_cost["heat_pump"],
     )
@@ -256,10 +239,12 @@ hydro_cap = {
     "BRA-S": max_capacity_hydro,
 }
 biomass_cap = {
-    "BRA-N": max_capacity_biomass,
-    "BRA-NE": max_capacity_biomass,
-    "BRA-SE": max_capacity_biomass,
-    "BRA-S": max_capacity_biomass,
+    # Keep biomass effectively uncapped here.
+    # Very large p_nom_max values (e.g., 1e16) can create numerical instability.
+    "BRA-N": None,
+    "BRA-NE": None,
+    "BRA-SE": None,
+    "BRA-S": None,
 }
 
 # ============================
@@ -308,6 +293,7 @@ for region in regions:
 
         p_nom=0,
         p_nom_extendable=True,
+        p_min_pu=0.0,
 
         capital_cost=annualized_cost("gas_boiler_local"),
         # Fuel cost is paid at "gas supply"; keep link marginal at 0 to avoid double-counting.
@@ -394,7 +380,13 @@ network.add(
     constant=co2_limit,
 )
 
-network.optimize(solver_name="gurobi")
+network.optimize(
+    solver_name="gurobi",
+    solver_options={
+        "BarHomogeneous": 1,
+        "NumericFocus": 2,
+    },
+)
 
 #%% Results
 print("Objective value:", network.objective)
