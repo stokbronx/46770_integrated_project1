@@ -669,10 +669,6 @@ print(f"Net electricity share: {net_elec_share:.2f}%")
 
 print(f"Net gas flow (MWh): {net_gas:.2f}")
 print(f"Net gas share: {net_gas_share:.2f}%")
-#%%
-(network.lines_t.p0.mean()/1100*100).round(2)
-# %%
-(network.links_t.p0.mean()/1100*100).round(2)
 
 # %%
 #%%
@@ -685,4 +681,74 @@ network.lines_t.p0.abs().sum()
 network.links_t.p0.abs().sum()
 # %%
 print(22.96/(network.generators_t.p.sum().sum()/10**6))
+# %%
+network.generators.p_nom_opt # Optimal capacities of the generators
+# %%
+#%%############################ LCOE calculation (model g) ######################################
+
+lcoe_results = {}
+
+for region in regions:
+
+    bus = f"bus {region}"
+
+    # =========================
+    # GENERATORS at AC bus
+    # =========================
+    gens = network.generators.index[network.generators.bus == bus]
+
+    gen_capex = (
+        network.generators.p_nom_opt[gens] *
+        network.generators.capital_cost[gens]
+    ).sum()
+
+    gen_dispatch = network.generators_t.p[gens]
+    gen_opex = (
+        gen_dispatch *
+        network.generators.marginal_cost[gens]
+    ).sum().sum()
+
+    gen_energy = gen_dispatch.sum().sum()
+
+    # =========================
+    # CCGT LINKS (gas → electricity)
+    # =========================
+    ccgt = network.links.index[
+        (network.links.carrier == "ccgt") &
+        (network.links.bus1 == bus)
+    ]
+
+    ccgt_capex = (
+        network.links.p_nom_opt[ccgt] *
+        network.links.capital_cost[ccgt]
+    ).sum()
+
+    # electricity output is p1 (negative sign convention)
+    ccgt_dispatch = -network.links_t.p1[ccgt]
+    ccgt_opex = (
+        ccgt_dispatch *
+        network.links.marginal_cost[ccgt]
+    ).sum().sum()
+
+    ccgt_energy = ccgt_dispatch.sum().sum()
+
+    # =========================
+    # TOTALS
+    # =========================
+    total_capex = gen_capex + ccgt_capex
+    total_opex = gen_opex + ccgt_opex
+    total_energy = gen_energy + ccgt_energy
+
+    # =========================
+    # LCOE
+    # =========================
+    if total_energy > 0:
+        lcoe_results[region] = (total_capex + total_opex) / total_energy
+    else:
+        lcoe_results[region] = float("nan")
+
+
+print("\nLCOE at each bus ($/MWh):")
+for region, value in lcoe_results.items():
+    print(f"{region}: {value:.2f} $/MWh")
 # %%
