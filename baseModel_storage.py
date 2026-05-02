@@ -446,6 +446,7 @@ if "H2 storage" in n_st.stores.index:
     roll = e_level.rolling(24 * 7, min_periods=1).mean()
     print(f"  Rolling 7-d mean - min / max: {roll.min():,.0f} / {roll.max():,.0f}")
 
+#%%
 # ---------------------------------------------------------------------------
 # Figures for report: one PNG per figure (no subplots); no GUI pop-ups
 # ---------------------------------------------------------------------------
@@ -491,17 +492,18 @@ def _plot_partc_week_separate_files(
 ):
     """
     Save separate images: generation, battery power, battery SOC, H2 power, H2 energy.
-    file_prefix e.g. 'figures/partC_summer' -> partC_summer_gen_demand.png, ...
     """
     base = Path(file_prefix)
     base.parent.mkdir(parents=True, exist_ok=True)
+
     if sl_h2_storage is None:
         sl_h2_storage = sl
 
-    # --- 1) Generation + demand (single figure) ---
+    # --- 1) Generation + demand ---
     fig, ax = plt.subplots(figsize=(14, 5))
     dispatch = n_st.generators_t.p.loc[sl, gen_names]
     active = [g for g in gen_names if dispatch[g].sum() > 0]
+
     if active:
         ax.stackplot(
             dispatch.index,
@@ -510,85 +512,135 @@ def _plot_partc_week_separate_files(
             colors=[gen_colors[g] for g in active],
             alpha=0.85,
         )
-    ax.plot(n_st.loads_t.p_set.loc[sl, "load"], color="black", linewidth=1.5, label="Demand")
+
+    ax.plot(
+        n_st.loads_t.p_set.loc[sl, "load"],
+        color="black",
+        linewidth=1.5,
+        label="Demand",
+    )
+
     _apply_partc_fonts(
         ax,
         title=f"{title_season} - generation & demand (with storage)",
         xlabel="Time",
         ylabel="Power [MW]",
     )
+
     ax.legend(loc="upper right", fontsize=_PARTC_LEGEND_FS, ncol=2)
     fig.autofmt_xdate()
     plt.tight_layout()
     _savefig_close_partc(fig, f"{file_prefix}_gen_demand.png")
 
-    # --- 2) Battery power only (single y-axis) ---
+    # --- 2) Battery power ---
     if {"battery charger", "battery discharger"}.issubset(set(n_st.links.index)):
         fig, ax = plt.subplots(figsize=(14, 4))
+
         p0_ch = n_st.links_t.p0.loc[sl, "battery charger"]
         p1_dis = n_st.links_t.p1.loc[sl, "battery discharger"]
-        ax.plot(p1_dis.index, p1_dis.clip(lower=0.0).values, color="darkviolet", label="Discharge [MW]", linewidth=1.2)
-        ax.plot(p0_ch.index, (-p0_ch).clip(lower=0.0).values, color="mediumpurple", label="Charge [MW]", linewidth=1.2)
+
+        ax.plot(
+            p1_dis.index,
+            p1_dis.clip(lower=0.0).values,
+            color="darkviolet",
+            label="Discharge [MW]",
+            linewidth=1.2,
+        )
+
+        ax.plot(
+            p0_ch.index,
+            (-p0_ch).clip(lower=0.0).values,
+            color="mediumpurple",
+            label="Charge [MW]",
+            linewidth=1.2,
+        )
+
         _apply_partc_fonts(
             ax,
             title=f"{title_season} - battery charge / discharge",
             xlabel="Time",
             ylabel="Power [MW]",
         )
+
         ax.legend(loc="upper right", fontsize=_PARTC_LEGEND_FS)
         fig.autofmt_xdate()
         plt.tight_layout()
         _savefig_close_partc(fig, f"{file_prefix}_battery_power.png")
 
-        # --- 3) Battery SOC / energy level from Store ---
+        # --- 3) Battery SOC (🔧 CHANGED COLOR TO GREEN) ---
         if "battery energy" in n_st.stores.index:
             soc = n_st.stores_t.e.loc[sl, "battery energy"]
+
             fig, ax = plt.subplots(figsize=(14, 5))
-            ax.fill_between(soc.index, soc.values, alpha=0.3, color="gray")
-            ax.plot(soc.index, soc.values, color="dimgray", linewidth=1.2, label="Stored energy")
+
+            ax.fill_between(soc.index, soc.values, alpha=0.35, color="green")
+            ax.plot(soc.index, soc.values, color="darkgreen", linewidth=1.2, label="Stored energy")
+
             _apply_partc_fonts(
                 ax,
                 title=f"{title_season} - battery state of charge",
                 xlabel="Time",
                 ylabel="Stored energy [MWh]",
             )
+
             ax.legend(loc="upper right", fontsize=_PARTC_LEGEND_FS)
             fig.autofmt_xdate()
             plt.tight_layout()
             _savefig_close_partc(fig, f"{file_prefix}_battery_soc.png")
 
-    # --- 4) H2: link powers (raw PyPSA - avoid clipping that hides small flows) ---
+    # --- 4) H2 link power ---
     if "electrolyzer" in n_st.links.index or "fuel cell" in n_st.links.index:
         fig, ax = plt.subplots(figsize=(14, 4))
+
         if "electrolyzer" in n_st.links.index:
             p0_el = n_st.links_t.p0.loc[sl, "electrolyzer"]
-            ax.plot(p0_el.index, p0_el.values, color="teal", linewidth=1.2, label="Electrolyzer bus0 power p0 [MW]")
+            ax.plot(
+                p0_el.index,
+                p0_el.values,
+                color="teal",
+                linewidth=1.2,
+                label="Electrolyzer p0 [MW]",
+            )
+
         if "fuel cell" in n_st.links.index:
             p1_fc = n_st.links_t.p1.loc[sl, "fuel cell"]
-            ax.plot(p1_fc.index, p1_fc.values, color="coral", linewidth=1.2, label="Fuel cell bus1 power p1 [MW]")
-        ax.axhline(0.0, color="k", linewidth=0.5, alpha=0.5)
+            ax.plot(
+                p1_fc.index,
+                p1_fc.values,
+                color="coral",
+                linewidth=1.2,
+                label="Fuel cell p1 [MW]",
+            )
+
+        ax.axhline(0.0, color="black", linewidth=0.5, alpha=0.5)
+
         _apply_partc_fonts(
             ax,
-            title=f"{title_season} - hydrogen links (raw solver output)",
+            title=f"{title_season} - hydrogen links",
             xlabel="Time",
             ylabel="Power [MW]",
         )
+
         ax.legend(loc="upper right", fontsize=_PARTC_LEGEND_FS)
         fig.autofmt_xdate()
         plt.tight_layout()
         _savefig_close_partc(fig, f"{file_prefix}_h2_link_power.png")
 
-    # --- 5) H2 storage energy (separate figure; multi-month window for seasonal view) ---
+    # --- 5) H2 storage energy ---
     if "H2 storage" in n_st.stores.index:
         e = n_st.stores_t.e.loc[sl_h2_storage, "H2 storage"]
+
         fig, ax = plt.subplots(figsize=(18, 6))
+
         ax.plot(e.index, e.values, color="olive", linewidth=1.2)
+
         if title_h2_storage is not None:
             h2_title = title_h2_storage
         elif sl_h2_storage == sl:
             h2_title = f"{title_season} - H2 storage energy level"
         else:
-            h2_title = f"{title_season} - H2 storage energy level (multi-month)"
+            h2_title = f"{title_season} - H2 storage energy level (multi-month / yearly)"
+
         _apply_partc_fonts(
             ax,
             title=h2_title,
@@ -598,11 +650,13 @@ def _plot_partc_week_separate_files(
             label_fs=_PARTC_H2_LABEL_FS,
             tick_fs=_PARTC_H2_TICK_FS,
         )
+
         fig.autofmt_xdate()
         plt.tight_layout()
+
+        # 🔧 NOTE: unchanged function, but now we pass full-year slice below
         _savefig_close_partc(fig, f"{file_prefix}_h2_storage_energy.png")
-
-
+#%% #################################################################################################
 # One week: gen/demand, battery, H2 links. Multi-month: H2 storage energy.
 _plot_partc_week_separate_files(
     slice("2024-01-07", "2024-01-13"),
@@ -612,30 +666,12 @@ _plot_partc_week_separate_files(
     title_h2_storage="Summer period (Jan-Mar 2024, Brazil) - H2 storage energy level",
 )
 _plot_partc_week_separate_files(
-    slice("2024-07-01", "2024-07-07"),
+    slice("2024-02-25", "2024-03-21"),
     "Winter week (Jul, Brazil)",
     "figures/partC_winter",
-    sl_h2_storage=slice("2024-07-01", "2024-09-30"),
+    sl_h2_storage=slice("2024-01-01", "2024-12-31"),
     title_h2_storage="Winter period (Jul-Sep 2024, Brazil) - H2 storage energy level",
 )
-
-# Full-year H2 storage energy level
-if "H2 storage" in n_st.stores.index:
-    e_h2_year = n_st.stores_t.e.loc[slice("2024-01-01", "2024-12-31 23:00"), "H2 storage"]
-    fig, ax = plt.subplots(figsize=(18, 6))
-    ax.plot(e_h2_year.index, e_h2_year.values, color="olive", linewidth=1.2)
-    _apply_partc_fonts(
-        ax,
-        title="Hydrogen storage energy level - full year 2024",
-        xlabel="Time",
-        ylabel="Stored energy [MWh]",
-        title_fs=_PARTC_H2_TITLE_FS,
-        label_fs=_PARTC_H2_LABEL_FS,
-        tick_fs=_PARTC_H2_TICK_FS,
-    )
-    fig.autofmt_xdate()
-    plt.tight_layout()
-    _savefig_close_partc(fig, "figures/partC_h2_storage_energy_full_year.png")
 
 # Annual mix: two separate pie charts (not side-by-side in one image)
 mix_base = n.generators_t.p.sum()
@@ -725,5 +761,61 @@ print(
     "  figures/partC_mix_baseline.png, figures/partC_mix_with_storage.png"
 )
 print("=" * 72)
+
+#%%
+# Your existing color map from the script
+gen_colors = {
+    "hydro": "royalblue",
+    "nuclear": "mediumorchid",
+    "biomass": "forestgreen",
+    "solar": "gold",
+    "onshorewind": "dodgerblue",
+}
+
+# Select your time window
+sl = slice("2024-02-25", "2024-03-21")
+
+# --- Extract data ---
+dispatch = n_st.generators_t.p.loc[sl, ["hydro", "nuclear", "biomass", "solar", "onshorewind"]]
+demand = n_st.loads_t.p_set.loc[sl, "load"]
+h2_energy = n_st.stores_t.e.loc[sl, "H2 storage"]
+
+# --- Create figure with two stacked subplots ---
+fig, axes = plt.subplots(2, 1, figsize=(16, 10), sharex=True)
+
+# -----------------------------
+# 1) Generation + Demand
+# -----------------------------
+ax = axes[0]
+active = [g for g in dispatch.columns if dispatch[g].sum() > 0]
+
+ax.stackplot(
+    dispatch.index,
+    dispatch[active].values.T,
+    labels=active,
+    colors=[gen_colors[g] for g in active],
+    alpha=0.85
+)
+
+ax.plot(demand.index, demand.values, color="black", linewidth=1.5, label="Demand")
+ax.set_ylabel("Power [MW]")
+ax.set_title("Generation & Demand (2024-02-25 → 2024-03-21)")
+ax.legend(loc="upper right")
+
+# -----------------------------
+# 2) H₂ Storage Energy Level
+# -----------------------------
+ax = axes[1]
+ax.plot(h2_energy.index, h2_energy.values, color="olive", linewidth=1.5)
+ax.set_ylabel("Stored H₂ Energy [MWh]")
+ax.set_title("H₂ Storage Energy Level (2024-02-25 → 2024-03-21)")
+ax.set_xlabel("Date (month/day)")
+
+# Format x-axis as month/day
+fig.autofmt_xdate()
+
+plt.tight_layout()
+plt.show()
+
 
 # %%
